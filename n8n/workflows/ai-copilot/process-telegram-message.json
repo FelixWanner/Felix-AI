@@ -123,7 +123,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Parse command from message text\nconst input = $input.item.json;\nconst text = (input.text || '').trim();\n\n// Command patterns\nconst commands = {\n  task: /^\\/task\\s+(.+)/i,\n  habit: /^\\/habit\\s+(\\w+)/i,\n  sup: /^\\/sup\\s+(\\w+)/i,\n  supplement: /^\\/supplement\\s+(\\w+)/i,\n  today: /^\\/today$/i,\n  balance: /^\\/balance$/i,\n  networth: /^\\/networth$/i,\n  nw: /^\\/nw$/i,\n  help: /^\\/help$/i,\n  status: /^\\/status$/i,\n  inbox: /^\\/inbox$/i,\n  fire: /^\\/fire$/i\n};\n\nlet command = null;\nlet args = null;\nlet isCommand = false;\n\n// Check each command pattern\nfor (const [cmd, pattern] of Object.entries(commands)) {\n  const match = text.match(pattern);\n  if (match) {\n    command = cmd;\n    args = match[1] || null;\n    isCommand = true;\n    break;\n  }\n}\n\n// If no command matched, treat as freetext for AI\nif (!isCommand && text.length > 0) {\n  command = 'ai_chat';\n  args = text;\n}\n\nreturn {\n  json: {\n    ...input,\n    command: command,\n    args: args,\n    is_command: isCommand,\n    raw_text: text\n  }\n};"
+        "jsCode": "// Parse command from message text\nconst input = $input.item.json;\nconst text = (input.text || '').trim();\n\n// Command patterns\nconst commands = {\n  task: /^\\/task\\s+(.+)/i,\n  habit: /^\\/habit\\s+(\\w+)/i,\n  sup: /^\\/sup\\s+(\\w+)/i,\n  supplement: /^\\/supplement\\s+(\\w+)/i,\n  today: /^\\/today$/i,\n  balance: /^\\/balance$/i,\n  networth: /^\\/networth$/i,\n  nw: /^\\/nw$/i,\n  help: /^\\/help$/i,\n  status: /^\\/status$/i,\n  inbox: /^\\/inbox$/i,\n  fire: /^\\/fire$/i,\n  search: /^\\/search\\s+(.+)/i,\n  ask: /^\\/ask\\s+(.+)/i,\n  docs: /^\\/docs\\s+(.+)/i\n};\n\nlet command = null;\nlet args = null;\nlet isCommand = false;\n\n// Check each command pattern\nfor (const [cmd, pattern] of Object.entries(commands)) {\n  const match = text.match(pattern);\n  if (match) {\n    command = cmd;\n    args = match[1] || null;\n    isCommand = true;\n    break;\n  }\n}\n\n// If no command matched, treat as freetext for AI\nif (!isCommand && text.length > 0) {\n  command = 'ai_chat';\n  args = text;\n}\n\nreturn {\n  json: {\n    ...input,\n    command: command,\n    args: args,\n    is_command: isCommand,\n    raw_text: text\n  }\n};"
       },
       "id": "parse-command",
       "name": "Parse Command",
@@ -355,6 +355,43 @@
                 ],
                 "combinator": "and"
               }
+            },
+            {
+              "outputKey": "search",
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "search",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "ask",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "docs",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "or"
+              }
             }
           ]
         },
@@ -574,7 +611,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const helpText = `:robot: **Life OS Bot Befehle**\\n\\n` +\n`:white_check_mark: **/task <text>** - Neue Aufgabe erstellen\\n` +\n`:dart: **/habit <name>** - Habit als erledigt markieren\\n` +\n`:pill: **/sup <name>** - Supplement loggen\\n` +\n`:calendar: **/today** - Tagesübersicht\\n` +\n`:bank: **/balance** - Kontostände\\n` +\n`:chart_with_upwards_trend: **/networth** - Vermögensübersicht\\n` +\n`:fire: **/fire** - FIRE Progress\\n` +\n`:inbox_tray: **/inbox** - Offene Einträge\\n\\n` +\n`:speech_balloon: Oder einfach eine Frage stellen!`;\n\nreturn {\n  json: {\n    response: helpText,\n    chat_id: $('Parse Command').item.json.chat_id\n  }\n};"
+        "jsCode": "const helpText = `:robot: **Life OS Bot Befehle**\\n\\n` +\n`:white_check_mark: **/task <text>** - Neue Aufgabe erstellen\\n` +\n`:dart: **/habit <name>** - Habit als erledigt markieren\\n` +\n`:pill: **/sup <name>** - Supplement loggen\\n` +\n`:calendar: **/today** - Tagesübersicht\\n` +\n`:bank: **/balance** - Kontostände\\n` +\n`:chart_with_upwards_trend: **/networth** - Vermögensübersicht\\n` +\n`:fire: **/fire** - FIRE Progress\\n` +\n`:inbox_tray: **/inbox** - Offene Einträge\\n` +\n`:mag: **/search <frage>** - Dokumente durchsuchen (RAG)\\n\\n` +\n`:speech_balloon: Oder einfach eine Frage stellen!`;\n\nreturn {\n  json: {\n    response: helpText,\n    chat_id: $('Parse Command').item.json.chat_id\n  }\n};"
       },
       "id": "format-help-response",
       "name": "Format Help Response",
@@ -679,6 +716,46 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [2660, 500]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.N8N_WEBHOOK_URL }}/webhook/rag-query",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $env.N8N_WEBHOOK_AUTH }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query\": {{ JSON.stringify($json.args) }},\n  \"chat_id\": {{ $json.chat_id }}\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "call-rag-workflow",
+      "name": "Call RAG Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 1000]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const ragResponse = $input.item.json;\nconst parseCommand = $('Parse Command').item.json;\n\nreturn {\n  json: {\n    response: ragResponse.response || ':x: Fehler bei der Dokumentensuche.',\n    chat_id: parseCommand.chat_id\n  }\n};"
+      },
+      "id": "format-search-response",
+      "name": "Format Search Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 1000]
     }
   ],
   "connections": {
@@ -816,6 +893,35 @@
         [
           {
             "node": "Get AI Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call RAG Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call RAG Workflow": {
+      "main": [
+        [
+          {
+            "node": "Format Search Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Search Response": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
             "type": "main",
             "index": 0
           }
