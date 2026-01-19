@@ -1,0 +1,570 @@
+{
+  "name": "Generate Morning Briefing",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 06:30 Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM garmin_daily_stats WHERE date = CURRENT_DATE OR date = CURRENT_DATE - 1 ORDER BY date DESC LIMIT 1",
+        "options": {}
+      },
+      "id": "get-garmin-stats",
+      "name": "Get Garmin Stats",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT h.id, h.name, h.category, h.icon, COALESCE(hl.completed, false) as completed, h.target_frequency, (SELECT COUNT(*) FROM habit_logs hl2 WHERE hl2.habit_id = h.id AND hl2.completed = true AND hl2.date > CURRENT_DATE - 7) as streak_7d FROM habits h LEFT JOIN habit_logs hl ON h.id = hl.habit_id AND hl.date = CURRENT_DATE WHERE h.is_active = true ORDER BY h.sort_order, h.name",
+        "options": {}
+      },
+      "id": "get-habits",
+      "name": "Get Today Habits",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, title, priority, status, due_date, item_type FROM inbox_items WHERE status IN ('neu', 'in_bearbeitung') AND (due_date IS NULL OR due_date <= CURRENT_DATE + 3) ORDER BY CASE priority WHEN 'hoch' THEN 1 WHEN 'mittel' THEN 2 ELSE 3 END, due_date NULLS LAST LIMIT 10",
+        "options": {}
+      },
+      "id": "get-inbox",
+      "name": "Get Priority Inbox",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 400],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, title, start_time, end_time, location, meeting_type FROM meetings WHERE date = CURRENT_DATE ORDER BY start_time",
+        "options": {}
+      },
+      "id": "get-meetings",
+      "name": "Get Today Meetings",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 500],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ai.id, ai.title, ai.insight_type, ai.priority, ai.category FROM ai_insights ai WHERE ai.status = 'pending' AND ai.priority IN ('action_required', 'warning') ORDER BY CASE ai.priority WHEN 'action_required' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END LIMIT 5",
+        "options": {}
+      },
+      "id": "get-insights",
+      "name": "Get AI Insights",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 600],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT net_worth, total_assets, total_liabilities, property_value, investment_value, cash_value FROM daily_snapshots WHERE date = (SELECT MAX(date) FROM daily_snapshots) LIMIT 1",
+        "options": {}
+      },
+      "id": "get-networth",
+      "name": "Get Net Worth",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 700],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT value FROM user_preferences WHERE key = 'telegram_chat_id' LIMIT 1",
+        "options": {}
+      },
+      "id": "get-chat-id",
+      "name": "Get Chat ID",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 800],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "wait-all",
+      "name": "Wait for All",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [680, 500],
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "multiplex",
+        "options": {}
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Collect all data\nconst garmin = $('Get Garmin Stats').first()?.json || {};\nconst habits = $('Get Today Habits').all().map(i => i.json);\nconst inbox = $('Get Priority Inbox').all().map(i => i.json);\nconst meetings = $('Get Today Meetings').all().map(i => i.json);\nconst insights = $('Get AI Insights').all().map(i => i.json);\nconst networth = $('Get Net Worth').first()?.json || {};\nconst chatId = $('Get Chat ID').first()?.json?.value || $env.TELEGRAM_CHAT_ID;\n\nreturn [{\n  json: {\n    garmin,\n    habits,\n    inbox,\n    meetings,\n    insights,\n    networth,\n    chat_id: chatId,\n    date: new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })\n  }\n}];"
+      },
+      "id": "collect-data",
+      "name": "Collect All Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 500]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Du bist der Life OS Morning Briefing Generator. Erstelle ein kurzes, motivierendes Morgenbriefing auf Deutsch.\n\nFormat:\n- Nutze Telegram Markdown\n- Halte es unter 2000 Zeichen\n- Beginne mit einer kurzen Begrüßung basierend auf den Schlafdaten\n- Priorisiere die wichtigsten Informationen\n- Beende mit einem motivierenden Satz\n- Nutze passende Emojis"
+            },
+            {
+              "role": "user",
+              "content": "=Erstelle das Morgenbriefing für {{ $json.date }}:\n\n**Garmin Daten (letzte Nacht):**\n{{ JSON.stringify($json.garmin, null, 2) }}\n\n**Habits für heute ({{ $json.habits.length }} gesamt):**\n{{ $json.habits.map(h => `- ${h.name} (${h.category}): ${h.completed ? 'erledigt' : 'offen'}`).join('\\n') }}\n\n**Prioritäts-Inbox ({{ $json.inbox.length }} Einträge):**\n{{ $json.inbox.map(i => `- [${i.priority}] ${i.title}${i.due_date ? ' (fällig: ' + i.due_date + ')' : ''}`).join('\\n') || 'Keine dringenden Aufgaben' }}\n\n**Termine heute ({{ $json.meetings.length }}):**\n{{ $json.meetings.map(m => `- ${m.start_time}: ${m.title}`).join('\\n') || 'Keine Termine' }}\n\n**AI Insights:**\n{{ $json.insights.map(i => `- [${i.priority}] ${i.title}`).join('\\n') || 'Keine offenen Insights' }}\n\n**Finanzen:**\nNettovermögen: {{ $json.networth.net_worth ? $json.networth.net_worth.toLocaleString('de-DE') + ' EUR' : 'n/a' }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 1000
+        }
+      },
+      "id": "generate-briefing",
+      "name": "Generate Briefing with AI",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [1120, 500],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-api",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Fallback briefing if AI fails\nconst data = $('Collect All Data').first().json;\nconst garmin = data.garmin || {};\nconst habits = data.habits || [];\nconst inbox = data.inbox || [];\nconst meetings = data.meetings || [];\nconst insights = data.insights || [];\nconst networth = data.networth || {};\n\nconst formatCurrency = (n) => n ? new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n) : 'n/a';\n\nlet briefing = `:sunrise: **Guten Morgen!**\\n`;\nbriefing += `_${data.date}_\\n\\n`;\n\n// Sleep & Recovery\nif (garmin.sleep_score || garmin.body_battery) {\n  briefing += `:sleeping: **Schlaf & Erholung**\\n`;\n  if (garmin.sleep_score) briefing += `Schlafqualität: ${garmin.sleep_score}/100\\n`;\n  if (garmin.sleep_duration_hours) briefing += `Schlafdauer: ${garmin.sleep_duration_hours.toFixed(1)}h\\n`;\n  if (garmin.body_battery) briefing += `Body Battery: ${garmin.body_battery}%\\n`;\n  if (garmin.hrv_status) briefing += `HRV: ${garmin.hrv_status}\\n`;\n  briefing += '\\n';\n}\n\n// Habits\nconst completedHabits = habits.filter(h => h.completed).length;\nbriefing += `:dart: **Habits** (${completedHabits}/${habits.length})\\n`;\nhabits.slice(0, 5).forEach(h => {\n  briefing += `${h.completed ? ':white_check_mark:' : ':white_large_square:'} ${h.name}\\n`;\n});\nif (habits.length > 5) briefing += `... und ${habits.length - 5} weitere\\n`;\nbriefing += '\\n';\n\n// Meetings\nif (meetings.length > 0) {\n  briefing += `:calendar: **Termine** (${meetings.length})\\n`;\n  meetings.slice(0, 3).forEach(m => {\n    briefing += `:clock${parseInt(m.start_time?.split(':')[0]) || 9}: ${m.start_time || ''} ${m.title}\\n`;\n  });\n  if (meetings.length > 3) briefing += `... und ${meetings.length - 3} weitere\\n`;\n  briefing += '\\n';\n}\n\n// Priority Tasks\nconst highPriority = inbox.filter(i => i.priority === 'hoch');\nif (highPriority.length > 0) {\n  briefing += `:exclamation: **Prioritäten**\\n`;\n  highPriority.slice(0, 3).forEach(i => {\n    briefing += `:red_circle: ${i.title}\\n`;\n  });\n  briefing += '\\n';\n}\n\n// Insights\nif (insights.length > 0) {\n  briefing += `:bulb: **Wichtige Hinweise**\\n`;\n  insights.slice(0, 2).forEach(i => {\n    const emoji = i.priority === 'action_required' ? ':warning:' : ':information_source:';\n    briefing += `${emoji} ${i.title}\\n`;\n  });\n  briefing += '\\n';\n}\n\n// Quick Stats\nbriefing += `:bar_chart: **Quick Stats**\\n`;\nbriefing += `Inbox: ${inbox.length} offen | `;\nbriefing += `Vermögen: ${formatCurrency(networth.net_worth)}\\n\\n`;\n\n// Motivation\nconst motivations = [\n  ':muscle: Mach heute zu einem produktiven Tag!',\n  ':rocket: Volle Kraft voraus!',\n  ':star: Du schaffst das!',\n  ':fire: Gib heute alles!',\n  ':zap: Energie für den Tag!'\n];\nbriefing += motivations[Math.floor(Math.random() * motivations.length)];\n\nreturn {\n  json: {\n    briefing: briefing,\n    chat_id: data.chat_id\n  }\n};"
+      },
+      "id": "format-fallback-briefing",
+      "name": "Format Fallback Briefing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 700]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-ai-response",
+              "leftValue": "={{ $json.message?.content || $json.text }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-ai-success",
+      "name": "AI Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 500]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const aiResponse = $input.item.json.message?.content || $input.item.json.text;\nconst chatId = $('Collect All Data').first().json.chat_id;\n\nreturn {\n  json: {\n    briefing: aiResponse,\n    chat_id: chatId\n  }\n};"
+      },
+      "id": "use-ai-briefing",
+      "name": "Use AI Briefing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 400]
+    },
+    {
+      "parameters": {},
+      "id": "merge-briefing",
+      "name": "Merge Briefing",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1780, 500]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.briefing }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "disable_notification": false
+        }
+      },
+      "id": "send-briefing",
+      "name": "Send Briefing",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2000, 500],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Life OS Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO morning_briefings (id, date, content, sent_at, created_at) VALUES (gen_random_uuid(), CURRENT_DATE, '{{ $json.briefing.replace(/'/g, \"''\").substring(0, 10000) }}', NOW(), NOW()) ON CONFLICT (date) DO UPDATE SET content = EXCLUDED.content, sent_at = NOW()",
+        "options": {}
+      },
+      "id": "save-briefing",
+      "name": "Save Briefing",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2220, 500],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "no-op-end",
+      "name": "End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2440, 500]
+    }
+  ],
+  "connections": {
+    "Daily 06:30 Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Garmin Stats",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Today Habits",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Priority Inbox",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Today Meetings",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get AI Insights",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Net Worth",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Chat ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Garmin Stats": {
+      "main": [
+        [
+          {
+            "node": "Wait for All",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Today Habits": {
+      "main": [
+        [
+          {
+            "node": "Wait for All",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get Priority Inbox": {
+      "main": [
+        [
+          {
+            "node": "Wait for All",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Get Today Meetings": {
+      "main": [
+        [
+          {
+            "node": "Wait for All",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Get AI Insights": {
+      "main": [
+        [
+          {
+            "node": "Wait for All",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Get Net Worth": {
+      "main": [
+        [
+          {
+            "node": "Wait for All",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    },
+    "Get Chat ID": {
+      "main": [
+        [
+          {
+            "node": "Wait for All",
+            "type": "main",
+            "index": 6
+          }
+        ]
+      ]
+    },
+    "Wait for All": {
+      "main": [
+        [
+          {
+            "node": "Collect All Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect All Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Briefing with AI",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Format Fallback Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Briefing with AI": {
+      "main": [
+        [
+          {
+            "node": "Check AI Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check AI Success?": {
+      "main": [
+        [
+          {
+            "node": "Use AI Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Briefing",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Use AI Briefing": {
+      "main": [
+        [
+          {
+            "node": "Merge Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Fallback Briefing": {
+      "main": [
+        [
+          {
+            "node": "Merge Briefing",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Briefing": {
+      "main": [
+        [
+          {
+            "node": "Send Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Briefing": {
+      "main": [
+        [
+          {
+            "node": "Save Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Briefing": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "life-os"
+  },
+  "tags": [
+    {
+      "name": "ai-copilot",
+      "id": "ai-copilot-tag"
+    },
+    {
+      "name": "telegram",
+      "id": "telegram-tag"
+    },
+    {
+      "name": "morning-briefing",
+      "id": "briefing-tag"
+    }
+  ],
+  "pinData": {},
+  "staticData": null,
+  "triggerCount": 0
+}
