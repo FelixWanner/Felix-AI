@@ -2,6 +2,8 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import Layout from '@/components/layout/Layout'
 import Dashboard from '@/pages/Dashboard'
 import WealthOverview from '@/pages/wealth/Overview'
+import Properties from '@/pages/wealth/Properties'
+import PropertyDetail from '@/pages/wealth/PropertyDetail'
 
 // Lazy load pages (to be implemented)
 // import Productivity from '@/pages/productivity'
@@ -33,7 +35,8 @@ function App() {
         {/* Wealth Module */}
         <Route path="wealth">
           <Route index element={<WealthOverview />} />
-          <Route path="properties" element={<PlaceholderPage title="Immobilien" />} />
+          <Route path="properties" element={<Properties />} />
+          <Route path="properties/:id" element={<PropertyDetail />} />
           <Route path="accounts" element={<PlaceholderPage title="Konten" />} />
           <Route path="loans" element={<PlaceholderPage title="Kredite" />} />
           <Route path="investments" element={<PlaceholderPage title="Investments" />} />
