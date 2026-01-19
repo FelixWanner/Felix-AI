@@ -1,0 +1,445 @@
+{
+  "name": "Process Scan Inbox (GMI to Inbox Items)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "45 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 06:45 Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gmi-webhook",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "GMI Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 500],
+      "webhookId": "gmi-document-webhook",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT i.*, NOT EXISTS (SELECT 1 FROM inbox_items ii WHERE ii.source_id = i.gmi_document_id AND ii.source = 'gmi') as needs_inbox FROM invoices i WHERE i.created_at > NOW() - INTERVAL '24 hours' AND i.gmi_document_id IS NOT NULL ORDER BY i.created_at DESC",
+        "options": {}
+      },
+      "id": "get-new-invoices",
+      "name": "Get New Invoices",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-invoices",
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-invoices",
+      "name": "Has New Invoices?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "needs-inbox",
+              "leftValue": "={{ $json.needs_inbox }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-needs-inbox",
+      "name": "Needs Inbox Item?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Transform invoice to inbox item\nconst invoice = $input.item.json;\n\n// Determine priority based on due date and amount\nconst determinePriority = (invoice) => {\n  const dueDate = invoice.due_date ? new Date(invoice.due_date) : null;\n  const amount = invoice.gross_amount || 0;\n  const now = new Date();\n  \n  // Overdue = highest priority\n  if (dueDate && dueDate < now) return 'hoch';\n  \n  // Due within 7 days or high amount = medium priority\n  if (dueDate) {\n    const daysUntilDue = (dueDate - now) / (1000 * 60 * 60 * 24);\n    if (daysUntilDue <= 7) return 'mittel';\n  }\n  \n  if (amount > 1000) return 'mittel';\n  \n  return 'niedrig';\n};\n\n// Generate title\nconst generateTitle = (invoice) => {\n  let title = 'Rechnung';\n  if (invoice.vendor_name) {\n    title += ` von ${invoice.vendor_name}`;\n  }\n  if (invoice.invoice_number) {\n    title += ` (${invoice.invoice_number})`;\n  }\n  return title;\n};\n\n// Generate content summary\nconst generateContent = (invoice) => {\n  const lines = [];\n  \n  if (invoice.gross_amount) {\n    lines.push(`Betrag: ${invoice.gross_amount.toFixed(2)} ${invoice.currency || 'EUR'}`);\n  }\n  if (invoice.invoice_date) {\n    lines.push(`Rechnungsdatum: ${invoice.invoice_date}`);\n  }\n  if (invoice.due_date) {\n    lines.push(`Fällig: ${invoice.due_date}`);\n  }\n  if (invoice.payment_status) {\n    lines.push(`Status: ${invoice.payment_status}`);\n  }\n  \n  return lines.join('\\n');\n};\n\n// Determine action needed\nconst determineAction = (invoice) => {\n  if (invoice.payment_status === 'offen' || invoice.payment_status === 'überfällig') {\n    return 'Rechnung prüfen und bezahlen';\n  }\n  if (invoice.invoice_type === 'eingang') {\n    return 'Rechnung prüfen und verbuchen';\n  }\n  return 'Rechnung prüfen';\n};\n\nreturn {\n  json: {\n    source: 'gmi',\n    source_id: invoice.gmi_document_id,\n    item_type: 'invoice',\n    title: generateTitle(invoice),\n    content: generateContent(invoice),\n    priority: determinePriority(invoice),\n    status: 'neu',\n    action_required: determineAction(invoice),\n    due_date: invoice.due_date,\n    metadata: {\n      invoice_id: invoice.id,\n      vendor_name: invoice.vendor_name,\n      gross_amount: invoice.gross_amount,\n      currency: invoice.currency,\n      invoice_type: invoice.invoice_type,\n      payment_status: invoice.payment_status,\n      pdf_url: invoice.pdf_url\n    },\n    // Link to related entities\n    invoice_id: invoice.id,\n    property_id: invoice.property_id || null\n  }\n};"
+      },
+      "id": "transform-to-inbox",
+      "name": "Transform to Inbox Item",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO inbox_items (id, source, source_id, item_type, title, content, priority, status, action_required, due_date, metadata, invoice_id, property_id, created_at, updated_at) VALUES (gen_random_uuid(), '{{ $json.source }}', '{{ $json.source_id }}', '{{ $json.item_type }}', '{{ $json.title.replace(/'/g, \"''\") }}', '{{ $json.content.replace(/'/g, \"''\").replace(/\\n/g, '\\n') }}', '{{ $json.priority }}', '{{ $json.status }}', '{{ $json.action_required.replace(/'/g, \"''\") }}', {{ $json.due_date ? \"'\" + $json.due_date + \"'\" : 'NULL' }}, '{{ JSON.stringify($json.metadata).replace(/'/g, \"''\") }}'::jsonb, {{ $json.invoice_id ? \"'\" + $json.invoice_id + \"'\" : 'NULL' }}, {{ $json.property_id ? \"'\" + $json.property_id + \"'\" : 'NULL' }}, NOW(), NOW()) RETURNING id, title",
+        "options": {}
+      },
+      "id": "insert-inbox-item",
+      "name": "Insert Inbox Item",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1340, 100],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Auto-categorize invoice based on vendor and content\nconst invoice = $input.item.json;\n\n// Category rules based on vendor names\nconst vendorCategories = {\n  // Utilities\n  'stadtwerke': 'nebenkosten',\n  'energieversorgung': 'nebenkosten',\n  'gas': 'nebenkosten',\n  'strom': 'nebenkosten',\n  'wasser': 'nebenkosten',\n  \n  // Insurance\n  'versicherung': 'versicherung',\n  'allianz': 'versicherung',\n  'axa': 'versicherung',\n  'huk': 'versicherung',\n  \n  // Property related\n  'hausverwaltung': 'hausverwaltung',\n  'handwerk': 'reparaturen',\n  'sanitär': 'reparaturen',\n  'heizung': 'reparaturen',\n  \n  // Banking\n  'bank': 'bankgebühren',\n  'sparkasse': 'bankgebühren',\n  'volksbank': 'bankgebühren',\n  \n  // Office\n  'büro': 'büromaterial',\n  'amazon': 'büromaterial',\n  \n  // Tax\n  'steuerberater': 'steuerberatung',\n  'finanzamt': 'steuern'\n};\n\n// Try to match vendor to category\nlet suggestedCategory = null;\nconst vendorLower = (invoice.vendor_name || '').toLowerCase();\n\nfor (const [keyword, category] of Object.entries(vendorCategories)) {\n  if (vendorLower.includes(keyword)) {\n    suggestedCategory = category;\n    break;\n  }\n}\n\n// Try to match property based on address in OCR text\nlet suggestedPropertyId = null;\n// This would require querying properties and matching addresses\n// For now, return null and let user assign manually\n\nreturn {\n  json: {\n    ...invoice,\n    suggested_category: suggestedCategory,\n    suggested_property_id: suggestedPropertyId,\n    needs_review: !suggestedCategory // Flag if couldn't auto-categorize\n  }\n};"
+      },
+      "id": "auto-categorize",
+      "name": "Auto-Categorize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE invoices SET category = '{{ $json.suggested_category }}' WHERE id = '{{ $json.id }}' AND category IS NULL AND '{{ $json.suggested_category }}' != ''",
+        "options": {}
+      },
+      "id": "update-invoice-category",
+      "name": "Update Invoice Category",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1340, 300],
+      "disabled": true,
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Aggregate statistics\nconst items = $input.all();\nconst newItems = items.filter(i => i.json.id);\n\nreturn [{\n  json: {\n    total_processed: items.length,\n    inbox_items_created: newItems.length,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "aggregate-stats",
+      "name": "Aggregate Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-new-items",
+              "leftValue": "={{ $json.inbox_items_created }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-created-items",
+      "name": "Created Any Items?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 100]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "=:inbox_tray: **{{ $json.inbox_items_created }} neue Inbox-Einträge**\n\nAus GMI-Scans wurden neue Einträge in deiner Inbox erstellt.\n\n:arrow_right: [Inbox öffnen]({{ $env.APP_URL }}/productivity/inbox)",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "disable_notification": false
+        }
+      },
+      "id": "telegram-notify",
+      "name": "Notify New Inbox Items",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2000, 0],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Life OS Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO ai_processing_queue (id, entity_type, entity_id, processing_type, status, priority, created_at) SELECT gen_random_uuid(), 'invoice', i.id, 'categorize', 'pending', CASE WHEN i.due_date < NOW() + INTERVAL '7 days' THEN 1 ELSE 2 END, NOW() FROM invoices i WHERE i.created_at > NOW() - INTERVAL '24 hours' AND i.gmi_document_id IS NOT NULL AND i.category IS NULL AND NOT EXISTS (SELECT 1 FROM ai_processing_queue q WHERE q.entity_id = i.id AND q.processing_type = 'categorize')",
+        "options": {}
+      },
+      "id": "queue-ai-processing",
+      "name": "Queue for AI Processing",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2000, 200],
+      "disabled": true,
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "no-op-end",
+      "name": "End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2220, 200]
+    },
+    {
+      "parameters": {},
+      "id": "no-op-no-data",
+      "name": "No New Invoices",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [900, 400]
+    }
+  ],
+  "connections": {
+    "Daily 06:45 Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get New Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GMI Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get New Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get New Invoices": {
+      "main": [
+        [
+          {
+            "node": "Has New Invoices?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has New Invoices?": {
+      "main": [
+        [
+          {
+            "node": "Needs Inbox Item?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No New Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Inbox Item?": {
+      "main": [
+        [
+          {
+            "node": "Transform to Inbox Item",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform to Inbox Item": {
+      "main": [
+        [
+          {
+            "node": "Insert Inbox Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Inbox Item": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Stats": {
+      "main": [
+        [
+          {
+            "node": "Created Any Items?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Created Any Items?": {
+      "main": [
+        [
+          {
+            "node": "Notify New Inbox Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify New Inbox Items": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No New Invoices": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "life-os"
+  },
+  "tags": [
+    {
+      "name": "productivity",
+      "id": "productivity-tag"
+    },
+    {
+      "name": "wealth",
+      "id": "wealth-tag"
+    },
+    {
+      "name": "inbox",
+      "id": "inbox-tag"
+    },
+    {
+      "name": "getmyinvoices",
+      "id": "gmi-tag"
+    }
+  ],
+  "pinData": {},
+  "staticData": null,
+  "triggerCount": 0
+}
