@@ -1,0 +1,231 @@
+{
+  "name": "02 - Sync BHB Transactions",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 6,
+              "triggerAtMinute": 15
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 06:15",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "sync_status",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "source",
+              "keyValue": "buchhaltungsbutler"
+            }
+          ]
+        }
+      },
+      "id": "get-last-sync",
+      "name": "Get Last Sync Date",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://app.buchhaltungsbutler.de/api/v1/transactions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "date_from",
+              "value": "={{ $json.last_sync_at ? $json.last_sync_at.split('T')[0] : new Date(Date.now() - 30*24*60*60*1000).toISOString().split('T')[0] }}"
+            },
+            {
+              "name": "date_to",
+              "value": "={{ new Date().toISOString().split('T')[0] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bhb-api",
+      "name": "Fetch BHB Transactions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "bhb-api-key",
+          "name": "BHB API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Transform BHB transactions to Supabase format\nconst items = $input.all();\nconst transformed = [];\n\nfor (const item of items) {\n  const transactions = item.json.data || [item.json];\n  \n  for (const tx of transactions) {\n    transformed.push({\n      json: {\n        external_id: `bhb_tx_${tx.id}`,\n        account_id: null, // Will be linked via external_id lookup\n        external_account_id: `bhb_${tx.account_id}`,\n        date: tx.date,\n        amount: parseFloat(tx.amount),\n        currency: tx.currency || 'EUR',\n        description: tx.description || tx.purpose,\n        category: tx.category || null,\n        counterparty: tx.counterparty_name || null,\n        counterparty_iban: tx.counterparty_iban || null,\n        transaction_type: tx.amount >= 0 ? 'income' : 'expense',\n        is_reconciled: tx.is_reconciled || false,\n        metadata: {\n          bhb_id: tx.id,\n          bhb_category_id: tx.category_id,\n          original_data: tx\n        }\n      }\n    });\n  }\n}\n\nreturn transformed;"
+      },
+      "id": "transform-data",
+      "name": "Transform Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "transactions",
+        "columns": "external_id, external_account_id, date, amount, currency, description, category, counterparty, counterparty_iban, transaction_type, is_reconciled, metadata",
+        "conflictColumns": "external_id",
+        "options": {}
+      },
+      "id": "supabase-upsert",
+      "name": "Upsert Transactions",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1120, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Update sync status\nconst itemCount = $input.all().length;\n\nreturn [{\n  json: {\n    source: 'buchhaltungsbutler',\n    last_sync_at: new Date().toISOString(),\n    last_sync_status: 'success',\n    items_synced: itemCount\n  }\n}];"
+      },
+      "id": "prepare-status",
+      "name": "Prepare Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "sync_status",
+        "columns": "last_sync_at, last_sync_status, items_synced",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "source",
+              "keyValue": "buchhaltungsbutler"
+            }
+          ]
+        }
+      },
+      "id": "update-sync-status",
+      "name": "Update Sync Status",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1560, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 06:15": {
+      "main": [
+        [
+          {
+            "node": "Get Last Sync Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Last Sync Date": {
+      "main": [
+        [
+          {
+            "node": "Fetch BHB Transactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch BHB Transactions": {
+      "main": [
+        [
+          {
+            "node": "Transform Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Data": {
+      "main": [
+        [
+          {
+            "node": "Upsert Transactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Transactions": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Status": {
+      "main": [
+        [
+          {
+            "node": "Update Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "wealth"
+    },
+    {
+      "name": "sync"
+    }
+  ],
+  "active": false
+}

@@ -1,0 +1,361 @@
+{
+  "name": "19 - Generate Insights",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 22
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 22:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "transactions",
+        "columns": "date, amount, category, transaction_type",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "date",
+              "condition": "gte",
+              "keyValue": "={{ new Date(Date.now() - 30*24*60*60*1000).toISOString().split('T')[0] }}"
+            }
+          ]
+        },
+        "options": {
+          "returnAll": true
+        }
+      },
+      "id": "get-transactions",
+      "name": "Get Recent Transactions",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 100],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "daily_snapshots",
+        "columns": "snapshot_date, net_worth, cash_and_equivalents, investments, real_estate",
+        "options": {
+          "orderByField": "snapshot_date",
+          "orderByDirection": "DESC",
+          "limit": 30
+        }
+      },
+      "id": "get-snapshots",
+      "name": "Get Snapshots",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 260],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "garmin_daily_stats",
+        "columns": "date, sleep_score, body_battery_high, average_stress, steps, resting_hr",
+        "options": {
+          "orderByField": "date",
+          "orderByDirection": "DESC",
+          "limit": 14
+        }
+      },
+      "id": "get-health",
+      "name": "Get Health Data",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 420],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "habit_logs",
+        "columns": "habit_id, completed_at",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "completed_at",
+              "condition": "gte",
+              "keyValue": "={{ new Date(Date.now() - 14*24*60*60*1000).toISOString() }}"
+            }
+          ]
+        }
+      },
+      "id": "get-habits",
+      "name": "Get Habit Data",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 580],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyze data and find patterns\nconst transactions = $('Get Recent Transactions').all().map(i => i.json);\nconst snapshots = $('Get Snapshots').all().map(i => i.json);\nconst health = $('Get Health Data').all().map(i => i.json);\nconst habits = $('Get Habit Data').all().map(i => i.json);\n\nconst insights = [];\n\n// WEALTH INSIGHTS\n// Spending pattern analysis\nconst expenses = transactions.filter(t => t.transaction_type === 'expense');\nconst categorySpending = {};\nfor (const exp of expenses) {\n  const cat = exp.category || 'Sonstiges';\n  categorySpending[cat] = (categorySpending[cat] || 0) + Math.abs(exp.amount);\n}\n\nconst topCategory = Object.entries(categorySpending)\n  .sort((a, b) => b[1] - a[1])[0];\n\nif (topCategory && topCategory[1] > 500) {\n  insights.push({\n    type: 'spending',\n    priority: 'medium',\n    title: 'Höchste Ausgabenkategorie',\n    message: `${topCategory[0]}: €${topCategory[1].toFixed(0)} in den letzten 30 Tagen`,\n    action: 'Prüfe, ob diese Ausgaben notwendig sind'\n  });\n}\n\n// Net worth trend\nif (snapshots.length >= 7) {\n  const recent = snapshots.slice(0, 7);\n  const older = snapshots.slice(7, 14);\n  \n  const recentAvg = recent.reduce((s, d) => s + d.net_worth, 0) / recent.length;\n  const olderAvg = older.length > 0 ? older.reduce((s, d) => s + d.net_worth, 0) / older.length : recentAvg;\n  \n  const trend = recentAvg - olderAvg;\n  const trendPercent = olderAvg ? (trend / olderAvg * 100) : 0;\n  \n  if (Math.abs(trendPercent) > 1) {\n    insights.push({\n      type: 'wealth_trend',\n      priority: trendPercent < -2 ? 'high' : 'low',\n      title: trendPercent > 0 ? 'Vermögenszuwachs' : 'Vermögensrückgang',\n      message: `${trendPercent > 0 ? '+' : ''}${trendPercent.toFixed(1)}% in der letzten Woche`,\n      action: trendPercent < 0 ? 'Ausgaben und Investments prüfen' : 'Weiter so!'\n    });\n  }\n}\n\n// HEALTH INSIGHTS\nif (health.length >= 7) {\n  const avgSleep = health.reduce((s, d) => s + (d.sleep_score || 0), 0) / health.length;\n  const avgStress = health.reduce((s, d) => s + (d.average_stress || 0), 0) / health.length;\n  const avgSteps = health.reduce((s, d) => s + (d.steps || 0), 0) / health.length;\n  \n  // Sleep insight\n  if (avgSleep < 70) {\n    insights.push({\n      type: 'sleep',\n      priority: 'high',\n      title: 'Schlafqualität verbessern',\n      message: `Durchschnittlicher Schlaf-Score: ${avgSleep.toFixed(0)}/100`,\n      action: 'Früher ins Bett, Bildschirmzeit reduzieren'\n    });\n  }\n  \n  // Stress insight\n  if (avgStress > 50) {\n    insights.push({\n      type: 'stress',\n      priority: 'medium',\n      title: 'Erhöhtes Stresslevel',\n      message: `Durchschnittlicher Stress: ${avgStress.toFixed(0)}/100`,\n      action: 'Entspannungsübungen einplanen'\n    });\n  }\n  \n  // Steps insight\n  if (avgSteps < 7000) {\n    insights.push({\n      type: 'activity',\n      priority: 'medium',\n      title: 'Mehr Bewegung',\n      message: `Nur ${avgSteps.toFixed(0)} Schritte/Tag im Schnitt`,\n      action: 'Täglichen Spaziergang einplanen'\n    });\n  }\n}\n\n// HABIT INSIGHTS\nconst habitCounts = {};\nfor (const h of habits) {\n  habitCounts[h.habit_id] = (habitCounts[h.habit_id] || 0) + 1;\n}\n\nconst lowCompletionHabits = Object.entries(habitCounts)\n  .filter(([id, count]) => count < 7); // Less than 50% in 2 weeks\n\nif (lowCompletionHabits.length > 0) {\n  insights.push({\n    type: 'habits',\n    priority: 'medium',\n    title: 'Habits mit niedriger Completion',\n    message: `${lowCompletionHabits.length} Habits unter 50% Erfüllung`,\n    action: 'Habits vereinfachen oder anpassen'\n  });\n}\n\nreturn [{\n  json: {\n    date: new Date().toISOString().split('T')[0],\n    insights: insights,\n    insights_count: insights.length,\n    has_high_priority: insights.some(i => i.priority === 'high'),\n    raw_data: {\n      transaction_count: transactions.length,\n      snapshot_count: snapshots.length,\n      health_days: health.length,\n      habit_entries: habits.length\n    }\n  }\n}];"
+      },
+      "id": "analyze-data",
+      "name": "Analyze & Generate Insights",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 340]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.insights_count }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "has-insights",
+      "name": "Has Insights?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [960, 340]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "ai_insights",
+        "columns": "date, insight_type, priority, title, message, action, generated_at",
+        "options": {}
+      },
+      "id": "save-insights",
+      "name": "Save Insights",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1180, 240],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare insights for saving and notification\nconst data = $input.first().json;\n\n// Only notify if high priority insights exist\nif (!data.has_high_priority) {\n  return [{ json: { skip_notification: true, insights: data.insights } }];\n}\n\nlet message = `💡 *Tägliche Insights*\\n\\n`;\n\nconst priorityEmoji = {\n  'high': '🔴',\n  'medium': '🟡',\n  'low': '🟢'\n};\n\nfor (const insight of data.insights.filter(i => i.priority === 'high').slice(0, 3)) {\n  message += `${priorityEmoji[insight.priority]} *${insight.title}*\\n`;\n  message += `${insight.message}\\n`;\n  message += `→ ${insight.action}\\n\\n`;\n}\n\nif (data.insights.filter(i => i.priority !== 'high').length > 0) {\n  message += `_+ ${data.insights.filter(i => i.priority !== 'high').length} weitere Insights_`;\n}\n\nreturn [{\n  json: {\n    message: message,\n    parse_mode: 'Markdown',\n    skip_notification: false,\n    insights: data.insights\n  }\n}];"
+      },
+      "id": "prepare-notification",
+      "name": "Prepare Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1180, 440]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.skip_notification }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "should-notify",
+      "name": "Should Notify?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1400, 440]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1620, 360],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-creds",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 22:00": {
+      "main": [
+        [
+          {
+            "node": "Get Recent Transactions",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Snapshots",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Health Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Habit Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Recent Transactions": {
+      "main": [
+        [
+          {
+            "node": "Analyze & Generate Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Snapshots": {
+      "main": [
+        [
+          {
+            "node": "Analyze & Generate Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Health Data": {
+      "main": [
+        [
+          {
+            "node": "Analyze & Generate Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Habit Data": {
+      "main": [
+        [
+          {
+            "node": "Analyze & Generate Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze & Generate Insights": {
+      "main": [
+        [
+          {
+            "node": "Has Insights?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Insights?": {
+      "main": [
+        [
+          {
+            "node": "Save Insights",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Prepare Notification": {
+      "main": [
+        [
+          {
+            "node": "Should Notify?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Notify?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Send Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "ai-copilot"
+    },
+    {
+      "name": "daily"
+    }
+  ],
+  "active": false
+}

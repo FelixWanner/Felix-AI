@@ -1,0 +1,260 @@
+{
+  "name": "03 - Sync GMI Invoices",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 6,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 06:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.getmyinvoices.com/accounts/v3/documents",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "100"
+            },
+            {
+              "name": "status",
+              "value": "new"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gmi-api",
+      "name": "Fetch GMI Documents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "gmi-api-key",
+          "name": "GMI API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Transform GMI invoices to Supabase format\nconst items = $input.all();\nconst transformed = [];\n\nfor (const item of items) {\n  const documents = item.json.data || item.json.documents || [item.json];\n  \n  for (const doc of documents) {\n    const isIncome = doc.document_type === 'income' || doc.is_income;\n    \n    transformed.push({\n      json: {\n        external_id: `gmi_${doc.id}`,\n        document_type: doc.document_type || 'invoice',\n        direction: isIncome ? 'income' : 'expense',\n        vendor_name: doc.company_name || doc.vendor || null,\n        vendor_tax_id: doc.tax_id || null,\n        invoice_number: doc.document_number || doc.invoice_number || null,\n        invoice_date: doc.document_date || doc.invoice_date,\n        due_date: doc.due_date || null,\n        gross_amount: parseFloat(doc.gross_amount || doc.amount) || 0,\n        net_amount: parseFloat(doc.net_amount) || null,\n        tax_amount: parseFloat(doc.tax_amount) || null,\n        tax_rate: parseFloat(doc.tax_rate) || null,\n        currency: doc.currency || 'EUR',\n        payment_status: doc.payment_status || 'pending',\n        file_url: doc.file_url || doc.download_url || null,\n        category: doc.category || null,\n        notes: doc.notes || null,\n        metadata: {\n          gmi_id: doc.id,\n          gmi_status: doc.status,\n          original_data: doc\n        }\n      }\n    });\n  }\n}\n\nreturn transformed;"
+      },
+      "id": "transform-data",
+      "name": "Transform Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "invoices",
+        "columns": "external_id, document_type, direction, vendor_name, vendor_tax_id, invoice_number, invoice_date, due_date, gross_amount, net_amount, tax_amount, tax_rate, currency, payment_status, file_url, category, notes, metadata",
+        "conflictColumns": "external_id",
+        "options": {}
+      },
+      "id": "supabase-upsert",
+      "name": "Upsert Invoices",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [900, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.file_url }}",
+              "value2": ""
+            }
+          ]
+        }
+      },
+      "id": "has-file",
+      "name": "Has File?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "inbox_items",
+        "columns": "source, source_id, item_type, title, content, priority, status",
+        "options": {}
+      },
+      "id": "create-inbox-item",
+      "name": "Create Inbox Item",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1340, 200],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create inbox items for new invoices\nconst items = $input.all();\n\nreturn items.map(item => ({\n  json: {\n    source: 'getmyinvoices',\n    source_id: item.json.external_id,\n    item_type: 'document',\n    title: `New Invoice: ${item.json.vendor_name || 'Unknown'} - €${item.json.gross_amount}`,\n    content: `Invoice #${item.json.invoice_number || 'N/A'} from ${item.json.vendor_name || 'Unknown vendor'}. Amount: €${item.json.gross_amount}. Due: ${item.json.due_date || 'Not specified'}`,\n    priority: item.json.gross_amount > 1000 ? 'high' : 'medium',\n    status: 'pending'\n  }\n}));"
+      },
+      "id": "prepare-inbox",
+      "name": "Prepare Inbox Item",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 380]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "sync_status",
+        "columns": "last_sync_at, last_sync_status, items_synced",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "source",
+              "keyValue": "getmyinvoices"
+            }
+          ]
+        }
+      },
+      "id": "update-sync-status",
+      "name": "Update Sync Status",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1560, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 06:30": {
+      "main": [
+        [
+          {
+            "node": "Fetch GMI Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch GMI Documents": {
+      "main": [
+        [
+          {
+            "node": "Transform Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Data": {
+      "main": [
+        [
+          {
+            "node": "Upsert Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Invoices": {
+      "main": [
+        [
+          {
+            "node": "Has File?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has File?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Inbox Item",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Inbox Item": {
+      "main": [
+        [
+          {
+            "node": "Create Inbox Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Inbox Item": {
+      "main": [
+        [
+          {
+            "node": "Update Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "wealth"
+    },
+    {
+      "name": "sync"
+    }
+  ],
+  "active": false
+}
