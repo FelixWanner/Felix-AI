@@ -33,7 +33,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Prepare Python script for garth\nconst today = new Date().toISOString().split('T')[0];\n\nconst pythonScript = `\nimport json\nimport os\nimport sys\nfrom datetime import date, datetime\nfrom pathlib import Path\n\ntry:\n    import garth\nexcept ImportError:\n    print(json.dumps({\"error\": \"garth not installed. Run: pip install garth\"}))\n    sys.exit(1)\n\n# Session path for persistence\nSESSION_PATH = Path(os.environ.get('GARMIN_SESSION_PATH', '/app/data/garmin_session'))\n\ndef main():\n    result = {\n        \"date\": \"${today}\",\n        \"success\": False,\n        \"data\": {},\n        \"error\": None\n    }\n    \n    try:\n        # Try to resume existing session\n        if SESSION_PATH.exists():\n            garth.resume(SESSION_PATH)\n        else:\n            # Login with credentials from environment\n            email = os.environ.get('GARMIN_EMAIL')\n            password = os.environ.get('GARMIN_PASSWORD')\n            \n            if not email or not password:\n                result[\"error\"] = \"GARMIN_EMAIL and GARMIN_PASSWORD environment variables required\"\n                print(json.dumps(result))\n                return\n            \n            garth.login(email, password)\n            # Save session for next time\n            SESSION_PATH.parent.mkdir(parents=True, exist_ok=True)\n            garth.save(SESSION_PATH)\n        \n        target_date = date.fromisoformat(\"${today}\")\n        \n        # Fetch Daily Stats\n        try:\n            daily_stats = garth.connectapi(\n                f\"/usersummary-service/usersummary/daily/{target_date.isoformat()}\"\n            )\n            \n            result[\"data\"][\"steps\"] = daily_stats.get(\"totalSteps\", 0)\n            result[\"data\"][\"active_calories\"] = daily_stats.get(\"activeKilocalories\", 0)\n            result[\"data\"][\"total_calories\"] = daily_stats.get(\"totalKilocalories\", 0)\n            result[\"data\"][\"intensity_minutes\"] = (\n                daily_stats.get(\"moderateIntensityMinutes\", 0) + \n                daily_stats.get(\"vigorousIntensityMinutes\", 0)\n            )\n            result[\"data\"][\"floors_climbed\"] = daily_stats.get(\"floorsAscended\", 0)\n            result[\"data\"][\"resting_hr\"] = daily_stats.get(\"restingHeartRate\", None)\n        except Exception as e:\n            result[\"data\"][\"daily_stats_error\"] = str(e)\n        \n        # Fetch Sleep Data\n        try:\n            sleep_data = garth.connectapi(\n                f\"/wellness-service/wellness/dailySleepData/{target_date.isoformat()}\"\n            )\n            \n            if sleep_data:\n                result[\"data\"][\"sleep_score\"] = sleep_data.get(\"overallSleepScore\", {}).get(\"value\", None)\n                result[\"data\"][\"sleep_duration_minutes\"] = round(sleep_data.get(\"sleepTimeSeconds\", 0) / 60)\n                result[\"data\"][\"deep_sleep_minutes\"] = round(sleep_data.get(\"deepSleepSeconds\", 0) / 60)\n                result[\"data\"][\"light_sleep_minutes\"] = round(sleep_data.get(\"lightSleepSeconds\", 0) / 60)\n                result[\"data\"][\"rem_sleep_minutes\"] = round(sleep_data.get(\"remSleepSeconds\", 0) / 60)\n                result[\"data\"][\"awake_minutes\"] = round(sleep_data.get(\"awakeSleepSeconds\", 0) / 60)\n        except Exception as e:\n            result[\"data\"][\"sleep_error\"] = str(e)\n        \n        # Fetch Body Battery\n        try:\n            body_battery = garth.connectapi(\n                f\"/wellness-service/wellness/bodyBattery/days/{target_date.isoformat()}/1\"\n            )\n            \n            if body_battery and len(body_battery) > 0:\n                bb_data = body_battery[0]\n                result[\"data\"][\"body_battery_start\"] = bb_data.get(\"startTimestampGMT\", None)\n                result[\"data\"][\"body_battery_end\"] = bb_data.get(\"endTimestampGMT\", None)\n                result[\"data\"][\"body_battery_charged\"] = bb_data.get(\"charged\", 0)\n                result[\"data\"][\"body_battery_drained\"] = bb_data.get(\"drained\", 0)\n                \n                # Get start and end values from timeline if available\n                timeline = bb_data.get(\"bodyBatteryValuesArray\", [])\n                if timeline:\n                    result[\"data\"][\"body_battery_start\"] = timeline[0][1] if timeline[0] else None\n                    result[\"data\"][\"body_battery_end\"] = timeline[-1][1] if timeline[-1] else None\n        except Exception as e:\n            result[\"data\"][\"body_battery_error\"] = str(e)\n        \n        # Fetch Stress Data\n        try:\n            stress_data = garth.connectapi(\n                f\"/wellness-service/wellness/dailyStress/{target_date.isoformat()}\"\n            )\n            \n            if stress_data:\n                result[\"data\"][\"stress_avg\"] = stress_data.get(\"overallStressLevel\", None)\n                result[\"data\"][\"stress_max\"] = stress_data.get(\"maxStressLevel\", None)\n                result[\"data\"][\"rest_stress_minutes\"] = stress_data.get(\"restStressDuration\", 0) // 60\n                result[\"data\"][\"low_stress_minutes\"] = stress_data.get(\"lowStressDuration\", 0) // 60\n                result[\"data\"][\"medium_stress_minutes\"] = stress_data.get(\"mediumStressDuration\", 0) // 60\n                result[\"data\"][\"high_stress_minutes\"] = stress_data.get(\"highStressDuration\", 0) // 60\n        except Exception as e:\n            result[\"data\"][\"stress_error\"] = str(e)\n        \n        # Fetch HRV Data\n        try:\n            hrv_data = garth.connectapi(\n                f\"/hrv-service/hrv/{target_date.isoformat()}\"\n            )\n            \n            if hrv_data:\n                result[\"data\"][\"hrv_value\"] = hrv_data.get(\"hrvValue\", None)\n                status = hrv_data.get(\"status\", None)\n                if status:\n                    # Map status to our enum\n                    status_map = {\n                        \"BALANCED\": \"balanced\",\n                        \"HIGH\": \"high\", \n                        \"LOW\": \"low\",\n                        \"POOR\": \"low\"\n                    }\n                    result[\"data\"][\"hrv_status\"] = status_map.get(status.upper(), \"balanced\")\n        except Exception as e:\n            result[\"data\"][\"hrv_error\"] = str(e)\n        \n        result[\"success\"] = True\n        \n    except garth.exc.GarthHTTPError as e:\n        if \"401\" in str(e):\n            # Session expired, delete and retry\n            if SESSION_PATH.exists():\n                SESSION_PATH.unlink()\n            result[\"error\"] = \"Session expired. Will re-authenticate on next run.\"\n        else:\n            result[\"error\"] = f\"Garmin API error: {str(e)}\"\n    except Exception as e:\n        result[\"error\"] = f\"Unexpected error: {str(e)}\"\n    \n    print(json.dumps(result))\n\nif __name__ == \"__main__\":\n    main()\n`;\n\nreturn {\n  python_script: `python3 -c '${pythonScript.replace(/'/g, \"'\\\"'\\\"'\")}'`\n};"
+        "jsCode": "// Prepare Python script for garth\nconst today = new Date().toISOString().split('T')[0];\n\nconst pythonScript = `\nimport json\nimport os\nimport sys\nfrom datetime import date, datetime\nfrom pathlib import Path\n\ntry:\n    import garth\nexcept ImportError:\n    print(json.dumps({\"error\": \"garth not installed. Run: pip install garth\"}))\n    sys.exit(1)\n\n# Session path for persistence\nSESSION_PATH = Path(os.environ.get('GARMIN_SESSION_PATH', '/app/data/garmin_session'))\n\ndef main():\n    result = {\n        \"date\": \"${today}\",\n        \"success\": False,\n        \"data\": {},\n        \"error\": None\n    }\n    \n    try:\n        # Try to resume existing session\n        if SESSION_PATH.exists():\n            garth.resume(SESSION_PATH)\n        else:\n            # Login with credentials from environment\n            email = os.environ.get('GARMIN_EMAIL')\n            password = os.environ.get('GARMIN_PASSWORD')\n            \n            if not email or not password:\n                result[\"error\"] = \"GARMIN_EMAIL and GARMIN_PASSWORD environment variables required\"\n                print(json.dumps(result))\n                return\n            \n            garth.login(email, password)\n            # Save session for next time\n            SESSION_PATH.parent.mkdir(parents=True, exist_ok=True)\n            garth.save(SESSION_PATH)\n        \n        target_date = date.fromisoformat(\"${today}\")\n        \n        # Fetch Daily Stats\n        try:\n            daily_stats = garth.connectapi(\n                f\"/usersummary-service/usersummary/daily/{target_date.isoformat()}\"\n            )\n            \n            result[\"data\"][\"steps\"] = daily_stats.get(\"totalSteps\", 0)\n            result[\"data\"][\"active_calories\"] = daily_stats.get(\"activeKilocalories\", 0)\n            result[\"data\"][\"total_calories\"] = daily_stats.get(\"totalKilocalories\", 0)\n            result[\"data\"][\"intensity_minutes\"] = (\n                daily_stats.get(\"moderateIntensityMinutes\", 0) + \n                daily_stats.get(\"vigorousIntensityMinutes\", 0)\n            )\n            result[\"data\"][\"floors_climbed\"] = daily_stats.get(\"floorsAscended\", 0)\n            result[\"data\"][\"resting_hr\"] = daily_stats.get(\"restingHeartRate\", None)\n        except Exception as e:\n            result[\"data\"][\"daily_stats_error\"] = str(e)\n        \n        # Fetch Sleep Data\n        try:\n            sleep_data = garth.connectapi(\n                f\"/wellness-service/wellness/dailySleepData/{target_date.isoformat()}\"\n            )\n            \n            if sleep_data:\n                result[\"data\"][\"sleep_score\"] = sleep_data.get(\"overallSleepScore\", {}).get(\"value\", None)\n                result[\"data\"][\"sleep_duration_minutes\"] = round(sleep_data.get(\"sleepTimeSeconds\", 0) / 60)\n                result[\"data\"][\"deep_sleep_minutes\"] = round(sleep_data.get(\"deepSleepSeconds\", 0) / 60)\n                result[\"data\"][\"light_sleep_minutes\"] = round(sleep_data.get(\"lightSleepSeconds\", 0) / 60)\n                result[\"data\"][\"rem_sleep_minutes\"] = round(sleep_data.get(\"remSleepSeconds\", 0) / 60)\n                result[\"data\"][\"awake_minutes\"] = round(sleep_data.get(\"awakeSleepSeconds\", 0) / 60)\n        except Exception as e:\n            result[\"data\"][\"sleep_error\"] = str(e)\n        \n        # Fetch Body Battery\n        try:\n            body_battery = garth.connectapi(\n                f\"/wellness-service/wellness/bodyBattery/days/{target_date.isoformat()}/1\"\n            )\n            \n            if body_battery and len(body_battery) > 0:\n                bb_data = body_battery[0]\n                result[\"data\"][\"body_battery_charged\"] = bb_data.get(\"charged\", 0)\n                result[\"data\"][\"body_battery_drained\"] = bb_data.get(\"drained\", 0)\n                \n                # Get start and end values from timeline if available\n                timeline = bb_data.get(\"bodyBatteryValuesArray\", [])\n                if timeline:\n                    result[\"data\"][\"body_battery_start\"] = timeline[0][1] if timeline[0] else None\n                    result[\"data\"][\"body_battery_end\"] = timeline[-1][1] if timeline[-1] else None\n        except Exception as e:\n            result[\"data\"][\"body_battery_error\"] = str(e)\n        \n        # Fetch Stress Data\n        try:\n            stress_data = garth.connectapi(\n                f\"/wellness-service/wellness/dailyStress/{target_date.isoformat()}\"\n            )\n            \n            if stress_data:\n                result[\"data\"][\"stress_avg\"] = stress_data.get(\"overallStressLevel\", None)\n                result[\"data\"][\"stress_max\"] = stress_data.get(\"maxStressLevel\", None)\n                result[\"data\"][\"rest_stress_minutes\"] = stress_data.get(\"restStressDuration\", 0) // 60\n                result[\"data\"][\"low_stress_minutes\"] = stress_data.get(\"lowStressDuration\", 0) // 60\n                result[\"data\"][\"medium_stress_minutes\"] = stress_data.get(\"mediumStressDuration\", 0) // 60\n                result[\"data\"][\"high_stress_minutes\"] = stress_data.get(\"highStressDuration\", 0) // 60\n        except Exception as e:\n            result[\"data\"][\"stress_error\"] = str(e)\n        \n        # Fetch HRV Data\n        try:\n            hrv_data = garth.connectapi(\n                f\"/hrv-service/hrv/{target_date.isoformat()}\"\n            )\n            \n            if hrv_data:\n                result[\"data\"][\"hrv_value\"] = hrv_data.get(\"hrvValue\", None)\n                status = hrv_data.get(\"status\", None)\n                if status:\n                    # Map status to our enum\n                    status_map = {\n                        \"BALANCED\": \"balanced\",\n                        \"HIGH\": \"high\", \n                        \"LOW\": \"low\",\n                        \"POOR\": \"low\"\n                    }\n                    result[\"data\"][\"hrv_status\"] = status_map.get(status.upper(), \"balanced\")\n        except Exception as e:\n            result[\"data\"][\"hrv_error\"] = str(e)\n        \n        result[\"success\"] = True\n        \n    except garth.exc.GarthHTTPError as e:\n        if \"401\" in str(e):\n            # Session expired, delete and retry\n            if SESSION_PATH.exists():\n                SESSION_PATH.unlink()\n            result[\"error\"] = \"Session expired. Will re-authenticate on next run.\"\n        else:\n            result[\"error\"] = f\"Garmin API error: {str(e)}\"\n    except Exception as e:\n        result[\"error\"] = f\"Unexpected error: {str(e)}\"\n    \n    print(json.dumps(result))\n\nif __name__ == \"__main__\":\n    main()\n`;\n\nreturn {\n  python_script: \\`python3 -c '\\${pythonScript.replace(/'/g, \"'\\\\\"'\\\\\"'\")}'\\`\n};"
       },
       "id": "prepare-script",
       "name": "Prepare Python Script",
@@ -136,6 +136,75 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-poor-sleep",
+              "leftValue": "={{ $('Upsert Garmin Data').item.json.sleep_score }}",
+              "rightValue": 70,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-poor-sleep",
+      "name": "Poor Sleep Score?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2000, 200]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "=:warning: **Schlechter Schlaf Alert!**\n\nDein Sleep Score heute: **{{ $('Upsert Garmin Data').item.json.sleep_score }}/100**\n\n:crescent_moon: Schlafdauer: {{ Math.floor($('Upsert Garmin Data').item.json.sleep_duration_minutes / 60) }}h {{ $('Upsert Garmin Data').item.json.sleep_duration_minutes % 60 }}min\n:purple_circle: Tiefschlaf: {{ $('Upsert Garmin Data').item.json.deep_sleep_minutes || 0 }} min\n:blue_circle: Leichtschlaf: {{ $('Upsert Garmin Data').item.json.light_sleep_minutes || 0 }} min\n:large_blue_circle: REM: {{ $('Upsert Garmin Data').item.json.rem_sleep_minutes || 0 }} min\n:red_circle: Wach: {{ $('Upsert Garmin Data').item.json.awake_minutes || 0 }} min\n\n**Empfehlungen:**\n- Heute leichtes Training oder Ruhetag\n- Frueher ins Bett gehen\n- Koffein vor 14 Uhr vermeiden\n- Abends auf Bildschirme verzichten",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-poor-sleep",
+      "name": "Send Poor Sleep Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2220, 100],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Life OS Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "=:white_check_mark: **Garmin Sync Complete**\n\n:sleeping: Sleep: {{ $('Upsert Garmin Data').item.json.sleep_score || 'N/A' }}/100\n:battery: Body Battery: {{ $('Upsert Garmin Data').item.json.body_battery_start || 'N/A' }}%\n:chart_with_downwards_trend: Stress: {{ $('Upsert Garmin Data').item.json.stress_avg || 'N/A' }}\n:footprints: Steps: {{ $('Upsert Garmin Data').item.json.steps?.toLocaleString() || '0' }}\n:heart: Resting HR: {{ $('Upsert Garmin Data').item.json.resting_hr || 'N/A' }} bpm\n:heartpulse: HRV: {{ $('Upsert Garmin Data').item.json.hrv_value || 'N/A' }} ms ({{ $('Upsert Garmin Data').item.json.hrv_status || 'N/A' }})",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-success",
+      "name": "Send Telegram Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2220, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Life OS Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
         "operation": "executeQuery",
         "query": "INSERT INTO sync_status (id, source, entity_type, last_sync_at, status, error_message)\nVALUES (gen_random_uuid(), 'garmin', 'daily_stats', NOW(), 'error', '{{ $json.error }}')\nON CONFLICT (source, entity_type) DO UPDATE SET\n  last_sync_at = NOW(),\n  status = 'error',\n  error_message = '{{ $json.error }}'",
         "options": {}
@@ -173,32 +242,12 @@
       }
     },
     {
-      "parameters": {
-        "chatId": "={{ $credentials.telegramChatId }}",
-        "text": "=:white_check_mark: **Garmin Sync Complete**\n\n:sleeping: Sleep: {{ $('Upsert Garmin Data').item.json.sleep_score || 'N/A' }} / 100\n:battery: Body Battery: {{ $('Upsert Garmin Data').item.json.body_battery_start || 'N/A' }}%\n:chart_with_downwards_trend: Stress: {{ $('Upsert Garmin Data').item.json.stress_avg || 'N/A' }}\n:footprints: Steps: {{ $('Upsert Garmin Data').item.json.steps?.toLocaleString() || '0' }}\n:heart: Resting HR: {{ $('Upsert Garmin Data').item.json.resting_hr || 'N/A' }} bpm\n:heartpulse: HRV: {{ $('Upsert Garmin Data').item.json.hrv_value || 'N/A' }} ms ({{ $('Upsert Garmin Data').item.json.hrv_status || 'N/A' }})",
-        "additionalFields": {
-          "parse_mode": "Markdown"
-        }
-      },
-      "id": "telegram-success",
-      "name": "Send Telegram Summary",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1.2,
-      "position": [2000, 200],
-      "credentials": {
-        "telegramApi": {
-          "id": "telegram-bot",
-          "name": "Life OS Telegram Bot"
-        }
-      }
-    },
-    {
       "parameters": {},
       "id": "no-op-end",
       "name": "End",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [2220, 300]
+      "position": [2440, 300]
     }
   ],
   "connections": {
@@ -290,6 +339,24 @@
       "main": [
         [
           {
+            "node": "Poor Sleep Score?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poor Sleep Score?": {
+      "main": [
+        [
+          {
+            "node": "Send Poor Sleep Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Send Telegram Summary",
             "type": "main",
             "index": 0
@@ -297,11 +364,11 @@
         ]
       ]
     },
-    "Update Sync Status (Error)": {
+    "Send Poor Sleep Alert": {
       "main": [
         [
           {
-            "node": "Send Telegram Error",
+            "node": "Send Telegram Summary",
             "type": "main",
             "index": 0
           }
@@ -313,6 +380,17 @@
         [
           {
             "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sync Status (Error)": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Error",
             "type": "main",
             "index": 0
           }
@@ -338,7 +416,7 @@
     "callerPolicy": "workflowsFromSameOwner",
     "errorWorkflow": ""
   },
-  "versionId": "1",
+  "versionId": "2",
   "meta": {
     "templateCredsSetupCompleted": false,
     "instanceId": "life-os"
