@@ -1,0 +1,290 @@
+{
+  "name": "06 - Create Daily Snapshot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 23
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 23:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "bank_accounts",
+        "columns": "id, name, balance, currency, account_type",
+        "options": {
+          "returnAll": true
+        }
+      },
+      "id": "get-accounts",
+      "name": "Get Bank Accounts",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 200],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "investment_positions",
+        "columns": "isin, name, total_value, currency",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "quantity",
+              "condition": "gt",
+              "keyValue": "0"
+            }
+          ]
+        },
+        "options": {
+          "returnAll": true
+        }
+      },
+      "id": "get-investments",
+      "name": "Get Investments",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 400],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "properties",
+        "columns": "id, name, current_value, currency",
+        "options": {
+          "returnAll": true
+        }
+      },
+      "id": "get-properties",
+      "name": "Get Properties",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 600],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "loans",
+        "columns": "id, name, current_balance, currency",
+        "options": {
+          "returnAll": true
+        }
+      },
+      "id": "get-loans",
+      "name": "Get Loans",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 800],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "merge-data",
+      "name": "Merge All Data",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [740, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calculate daily snapshot\nconst allData = $input.all();\n\nlet totalCash = 0;\nlet totalInvestments = 0;\nlet totalRealEstate = 0;\nlet totalDebt = 0;\n\nconst breakdown = {\n  accounts: [],\n  investments: [],\n  properties: [],\n  loans: []\n};\n\n// Process all items\nfor (const item of allData) {\n  const data = item.json;\n  \n  // Bank accounts\n  if (data.account_type) {\n    const balance = parseFloat(data.balance) || 0;\n    totalCash += balance;\n    breakdown.accounts.push({\n      id: data.id,\n      name: data.name,\n      balance: balance,\n      type: data.account_type\n    });\n  }\n  \n  // Investments\n  if (data.isin) {\n    const value = parseFloat(data.total_value) || 0;\n    totalInvestments += value;\n    breakdown.investments.push({\n      isin: data.isin,\n      name: data.name,\n      value: value\n    });\n  }\n  \n  // Properties\n  if (data.current_value && !data.isin && !data.account_type && !data.current_balance) {\n    const value = parseFloat(data.current_value) || 0;\n    totalRealEstate += value;\n    breakdown.properties.push({\n      id: data.id,\n      name: data.name,\n      value: value\n    });\n  }\n  \n  // Loans (negative for debt)\n  if (data.current_balance) {\n    const balance = parseFloat(data.current_balance) || 0;\n    totalDebt += balance;\n    breakdown.loans.push({\n      id: data.id,\n      name: data.name,\n      balance: balance\n    });\n  }\n}\n\nconst totalAssets = totalCash + totalInvestments + totalRealEstate;\nconst netWorth = totalAssets - totalDebt;\n\nconst today = new Date();\nconst dateStr = today.toISOString().split('T')[0];\n\nreturn [{\n  json: {\n    snapshot_date: dateStr,\n    net_worth: netWorth,\n    total_assets: totalAssets,\n    total_liabilities: totalDebt,\n    cash_and_equivalents: totalCash,\n    investments: totalInvestments,\n    real_estate: totalRealEstate,\n    currency: 'EUR',\n    breakdown: breakdown,\n    created_at: today.toISOString()\n  }\n}];"
+      },
+      "id": "calc-snapshot",
+      "name": "Calculate Snapshot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 400]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "daily_snapshots",
+        "columns": "snapshot_date, net_worth, total_assets, total_liabilities, cash_and_equivalents, investments, real_estate, currency, breakdown, created_at",
+        "conflictColumns": "snapshot_date",
+        "options": {}
+      },
+      "id": "save-snapshot",
+      "name": "Save Snapshot",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1180, 400],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check for significant changes\nconst snapshot = $input.first().json;\n\n// Get previous snapshot for comparison\nconst yesterday = new Date();\nyesterday.setDate(yesterday.getDate() - 1);\nconst yesterdayStr = yesterday.toISOString().split('T')[0];\n\nreturn [{\n  json: {\n    ...snapshot,\n    notification_type: 'daily_snapshot',\n    message: `Daily Snapshot: Net Worth €${snapshot.net_worth.toLocaleString('de-DE', {minimumFractionDigits: 2})}`\n  }\n}];"
+      },
+      "id": "prepare-notification",
+      "name": "Prepare Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 400]
+    }
+  ],
+  "connections": {
+    "Daily 23:00": {
+      "main": [
+        [
+          {
+            "node": "Get Bank Accounts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Investments",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Properties",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Loans",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Bank Accounts": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Investments": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get Properties": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Loans": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge All Data": {
+      "main": [
+        [
+          {
+            "node": "Calculate Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Snapshot": {
+      "main": [
+        [
+          {
+            "node": "Save Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Snapshot": {
+      "main": [
+        [
+          {
+            "node": "Prepare Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "wealth"
+    },
+    {
+      "name": "daily"
+    }
+  ],
+  "active": false
+}

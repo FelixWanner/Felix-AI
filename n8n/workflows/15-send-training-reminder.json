@@ -1,0 +1,295 @@
+{
+  "name": "15 - Send Training Reminder",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 6,
+              "triggerAtMinute": 45
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 06:45",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "training_plans",
+        "columns": "id, name, description, is_active",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "is_active",
+              "keyValue": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-plan",
+      "name": "Get Active Training Plan",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 200],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "workouts",
+        "columns": "id, training_plan_id, name, workout_type, day_of_week, exercises, duration_minutes, notes",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "day_of_week",
+              "keyValue": "={{ new Date().getDay() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-workout",
+      "name": "Get Today's Workout",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 400],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "daily_readiness",
+        "columns": "date, readiness_score, recommendation",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "date",
+              "keyValue": "={{ new Date().toISOString().split('T')[0] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-readiness",
+      "name": "Get Today's Readiness",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 600],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine workout and readiness data\nconst plans = $('Get Active Training Plan').all();\nconst workouts = $('Get Today\\'s Workout').all();\nconst readiness = $('Get Today\\'s Readiness').all();\n\nconst today = new Date();\nconst dayNames = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];\nconst dayName = dayNames[today.getDay()];\n\nif (workouts.length === 0) {\n  return [{\n    json: {\n      has_workout: false,\n      day_name: dayName,\n      is_rest_day: true\n    }\n  }];\n}\n\nconst workout = workouts[0].json;\nconst plan = plans.length > 0 ? plans[0].json : null;\nconst readinessData = readiness.length > 0 ? readiness[0].json : null;\n\n// Parse exercises\nlet exercises = [];\ntry {\n  exercises = typeof workout.exercises === 'string' \n    ? JSON.parse(workout.exercises) \n    : (workout.exercises || []);\n} catch (e) {\n  exercises = [];\n}\n\nreturn [{\n  json: {\n    has_workout: true,\n    day_name: dayName,\n    is_rest_day: false,\n    plan_name: plan?.name || 'Kein Plan',\n    workout: {\n      id: workout.id,\n      name: workout.name,\n      type: workout.workout_type,\n      duration: workout.duration_minutes,\n      exercises: exercises,\n      notes: workout.notes\n    },\n    readiness: readinessData ? {\n      score: readinessData.readiness_score,\n      recommendation: readinessData.recommendation\n    } : null\n  }\n}];"
+      },
+      "id": "combine-data",
+      "name": "Combine Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.has_workout }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "has-workout",
+      "name": "Has Workout?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [960, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare training reminder message\nconst data = $input.first().json;\n\nconst workoutEmojis = {\n  'strength': '🏋️',\n  'cardio': '🏃',\n  'hiit': '⚡',\n  'yoga': '🧘',\n  'stretching': '🤸',\n  'swimming': '🏊',\n  'cycling': '🚴',\n  'rest': '😴'\n};\n\nconst emoji = workoutEmojis[data.workout.type] || '💪';\n\nlet message = `${emoji} *Training heute: ${data.day_name}*\\n\\n`;\nmessage += `📋 *${data.workout.name}*\\n`;\nmessage += `⏱ ca. ${data.workout.duration} Minuten\\n\\n`;\n\n// Add readiness info if available\nif (data.readiness) {\n  const readinessEmoji = data.readiness.score >= 70 ? '🟢' : (data.readiness.score >= 40 ? '🟡' : '🔴');\n  message += `${readinessEmoji} *Readiness: ${data.readiness.score}%*\\n`;\n  if (data.readiness.recommendation) {\n    message += `_${data.readiness.recommendation}_\\n`;\n  }\n  message += `\\n`;\n}\n\n// List exercises\nif (data.workout.exercises && data.workout.exercises.length > 0) {\n  message += `*Übungen:*\\n`;\n  for (const ex of data.workout.exercises.slice(0, 6)) {\n    const sets = ex.sets ? `${ex.sets}x` : '';\n    const reps = ex.reps || ex.duration || '';\n    message += `• ${ex.name} ${sets}${reps}\\n`;\n  }\n  if (data.workout.exercises.length > 6) {\n    message += `• ... und ${data.workout.exercises.length - 6} weitere\\n`;\n  }\n}\n\nif (data.workout.notes) {\n  message += `\\n📝 _${data.workout.notes}_\\n`;\n}\n\nmessage += `\\n━━━━━━━━━━━━━━━━━━\\n`;\nmessage += `Tippe /workout wenn abgeschlossen`;\n\nreturn [{\n  json: {\n    message: message,\n    parse_mode: 'Markdown',\n    workout_id: data.workout.id\n  }\n}];"
+      },
+      "id": "prepare-workout-msg",
+      "name": "Prepare Workout Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1180, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare rest day message\nconst data = $input.first().json;\n\nlet message = `😴 *Ruhetag: ${data.day_name}*\\n\\n`;\nmessage += `Kein Training geplant.\\n\\n`;\nmessage += `💡 *Ideen für heute:*\\n`;\nmessage += `• Leichtes Stretching\\n`;\nmessage += `• Spaziergang\\n`;\nmessage += `• Foam Rolling\\n`;\nmessage += `• Meditation\\n`;\nmessage += `\\nGenieß die Erholung! 🙏`;\n\nreturn [{\n  json: {\n    message: message,\n    parse_mode: 'Markdown',\n    is_rest_day: true\n  }\n}];"
+      },
+      "id": "prepare-rest-msg",
+      "name": "Prepare Rest Day Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1180, 500]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send Reminder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1400, 400],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-creds",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 06:45": {
+      "main": [
+        [
+          {
+            "node": "Get Active Training Plan",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Today's Workout",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Today's Readiness",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Training Plan": {
+      "main": [
+        [
+          {
+            "node": "Combine Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Today's Workout": {
+      "main": [
+        [
+          {
+            "node": "Combine Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Today's Readiness": {
+      "main": [
+        [
+          {
+            "node": "Combine Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine Data": {
+      "main": [
+        [
+          {
+            "node": "Has Workout?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Workout?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Workout Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Rest Day Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Workout Message": {
+      "main": [
+        [
+          {
+            "node": "Send Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Rest Day Message": {
+      "main": [
+        [
+          {
+            "node": "Send Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "health"
+    },
+    {
+      "name": "reminder"
+    }
+  ],
+  "active": false
+}

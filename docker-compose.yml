@@ -49,6 +49,12 @@ services:
     image: n8nio/n8n:latest
     container_name: lifeos-n8n
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     environment:
       - N8N_BASIC_AUTH_ACTIVE=true
       - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
@@ -77,6 +83,30 @@ services:
     depends_on:
       supabase-db:
         condition: service_healthy
+
+  # ═══════════════════════════════════════════════════════════════
+  # N8N Workflow Initializer - Auto-imports workflows on startup
+  # ═══════════════════════════════════════════════════════════════
+  n8n-init:
+    build:
+      context: ./n8n/init
+      dockerfile: Dockerfile
+    container_name: lifeos-n8n-init
+    environment:
+      - N8N_HOST=n8n
+      - N8N_PORT=5678
+      - N8N_API_URL=http://n8n:5678
+      - WORKFLOWS_DIR=/workflows
+      - MAX_RETRIES=60
+      - RETRY_INTERVAL=2
+    volumes:
+      - ./n8n/workflows:/workflows:ro
+    networks:
+      - lifeos-net
+    depends_on:
+      n8n:
+        condition: service_healthy
+    restart: "no"
 
   # ═══════════════════════════════════════════════════════════════
   # SUPABASE - Database & Backend
