@@ -1,169 +1,167 @@
 # Life OS - Caddyfile
-# Reverse Proxy Configuration for all services
+# Domain: life-os.fwanner.de with Subdomains
+# Automatic HTTPS via Let's Encrypt
 
 # ═══════════════════════════════════════════════════════════════
 # GLOBAL OPTIONS
 # ═══════════════════════════════════════════════════════════════
 {
-	# Email für Let's Encrypt (für Production)
-	# email {$ACME_EMAIL:admin@example.com}
-	
-	# Für lokale Entwicklung: selbstsignierte Zertifikate
-	local_certs
-	
+	# Email für Let's Encrypt Zertifikate
+	email admin@fwanner.de
+
 	# Admin API deaktivieren (Sicherheit)
 	admin off
 }
 
 # ═══════════════════════════════════════════════════════════════
-# LOCAL DEVELOPMENT
+# PRODUCTION - life-os.fwanner.de
 # ═══════════════════════════════════════════════════════════════
 
-# Dashboard (Frontend)
-dashboard.localhost {
+# ───────────────────────────────────────────────────────────────
+# Frontend (Main Domain)
+# https://life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+life-os.fwanner.de {
 	reverse_proxy frontend:3000
-	
-	# Kompression
+
 	encode gzip zstd
-	
-	# Security Headers
+
 	header {
 		X-Content-Type-Options nosniff
 		X-Frame-Options DENY
 		X-XSS-Protection "1; mode=block"
 		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		-Server
+	}
+
+	log {
+		output file /data/logs/frontend.log
+		format json
 	}
 }
 
-# n8n (Workflow Automation)
-n8n.localhost {
+# ───────────────────────────────────────────────────────────────
+# n8n Workflow Automation
+# https://n8n.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+n8n.life-os.fwanner.de {
 	reverse_proxy n8n:5678
-	
+
 	# WebSocket Support für n8n
 	@websockets {
 		header Connection *Upgrade*
 		header Upgrade websocket
 	}
 	reverse_proxy @websockets n8n:5678
-	
-	# Security Headers
+
 	header {
 		X-Content-Type-Options nosniff
 		X-Frame-Options SAMEORIGIN
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
+	}
+
+	log {
+		output file /data/logs/n8n.log
+		format json
 	}
 }
 
-# Supabase API
-api.localhost {
+# ───────────────────────────────────────────────────────────────
+# Supabase API (Kong Gateway)
+# https://api.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+api.life-os.fwanner.de {
 	reverse_proxy supabase-kong:8000
-	
+
 	# CORS Headers
 	header {
 		Access-Control-Allow-Origin *
 		Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
 		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info"
 		Access-Control-Max-Age 86400
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
 	}
-	
+
 	# Handle preflight requests
 	@options method OPTIONS
 	respond @options 204
+
+	log {
+		output file /data/logs/api.log
+		format json
+	}
 }
 
-# Supabase Studio (Admin UI)
-studio.localhost {
+# ───────────────────────────────────────────────────────────────
+# Supabase Studio (Admin Dashboard)
+# https://studio.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+studio.life-os.fwanner.de {
 	reverse_proxy supabase-studio:3000
-	
-	# Basic Auth für Sicherheit
-	basicauth {
-		{$DASHBOARD_USERNAME:admin} {$DASHBOARD_PASSWORD_HASH}
-	}
-	
+
 	header {
 		X-Content-Type-Options nosniff
 		X-Frame-Options SAMEORIGIN
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
 	}
-}
 
-# Supabase Storage
-storage.localhost {
-	reverse_proxy supabase-storage:5000
-	
-	# Erhöhtes Upload-Limit
-	request_body {
-		max_size 50MB
+	log {
+		output file /data/logs/studio.log
+		format json
 	}
 }
 
+# ───────────────────────────────────────────────────────────────
+# Supabase Storage
+# https://storage.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+storage.life-os.fwanner.de {
+	reverse_proxy supabase-storage:5000
 
-# ═══════════════════════════════════════════════════════════════
-# PRODUCTION (Hetzner) - Später aktivieren
-# Ersetze {$DOMAIN} durch deine Domain, z.B. lifeos.example.com
-# ═══════════════════════════════════════════════════════════════
+	# Erhöhtes Upload-Limit (100MB)
+	request_body {
+		max_size 100MB
+	}
 
-# dashboard.{$DOMAIN} {
-# 	reverse_proxy frontend:3000
-# 	
-# 	encode gzip zstd
-# 	
-# 	header {
-# 		X-Content-Type-Options nosniff
-# 		X-Frame-Options DENY
-# 		X-XSS-Protection "1; mode=block"
-# 		Referrer-Policy strict-origin-when-cross-origin
-# 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-# 		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' wss: https:;"
-# 		-Server
-# 	}
-# }
-# 
-# n8n.{$DOMAIN} {
-# 	reverse_proxy n8n:5678
-# 	
-# 	@websockets {
-# 		header Connection *Upgrade*
-# 		header Upgrade websocket
-# 	}
-# 	reverse_proxy @websockets n8n:5678
-# 	
-# 	# Rate Limiting für Webhooks
-# 	rate_limit {
-# 		zone webhooks {
-# 			key {remote_host}
-# 			events 100
-# 			window 1m
-# 		}
-# 	}
-# }
-# 
-# api.{$DOMAIN} {
-# 	reverse_proxy supabase-kong:8000
-# 	
-# 	header {
-# 		Access-Control-Allow-Origin https://dashboard.{$DOMAIN}
-# 		Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-# 		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info"
-# 		Access-Control-Max-Age 86400
-# 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-# 		-Server
-# 	}
-# }
-# 
-# studio.{$DOMAIN} {
-# 	reverse_proxy supabase-studio:3000
-# 	
-# 	# IP Whitelist für Studio (nur deine IPs)
-# 	@allowed {
-# 		remote_ip 1.2.3.4/32  # Deine IP hier
-# 	}
-# 	handle @allowed {
-# 		reverse_proxy supabase-studio:3000
-# 	}
-# 	handle {
-# 		respond "Access Denied" 403
-# 	}
-# }
+	header {
+		Access-Control-Allow-Origin *
+		Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output file /data/logs/storage.log
+		format json
+	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# Supabase Realtime (WebSocket)
+# https://realtime.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+realtime.life-os.fwanner.de {
+	reverse_proxy supabase-realtime:4000
+
+	# WebSocket Support
+	@websockets {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	reverse_proxy @websockets supabase-realtime:4000
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output file /data/logs/realtime.log
+		format json
+	}
+}
