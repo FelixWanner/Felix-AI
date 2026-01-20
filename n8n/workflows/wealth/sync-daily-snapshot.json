@@ -1,0 +1,278 @@
+{
+  "name": "Create Daily Snapshot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 23 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 23:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "accounts",
+        "returnAll": true,
+        "filterType": "string",
+        "filterString": "is_active=eq.true"
+      },
+      "id": "get-accounts",
+      "name": "Get All Accounts",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [450, 200],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "properties",
+        "returnAll": true
+      },
+      "id": "get-properties",
+      "name": "Get Properties",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [450, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "positions",
+        "returnAll": true
+      },
+      "id": "get-positions",
+      "name": "Get Positions",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [450, 400],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "companies",
+        "returnAll": true
+      },
+      "id": "get-companies",
+      "name": "Get Companies",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [450, 500],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "loans",
+        "returnAll": true
+      },
+      "id": "get-loans",
+      "name": "Get Loans",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [450, 600],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const accounts = $('Get All Accounts').all().map(i => i.json);\nconst properties = $('Get Properties').all().map(i => i.json);\nconst positions = $('Get Positions').all().map(i => i.json);\nconst companies = $('Get Companies').all().map(i => i.json);\nconst loans = $('Get Loans').all().map(i => i.json);\n\n// Calculate cash value\nconst cashTypes = ['giro', 'tagesgeld', 'festgeld', 'privat'];\nconst cashValue = accounts\n  .filter(a => cashTypes.includes(a.account_type))\n  .reduce((sum, a) => sum + (parseFloat(a.current_balance) || 0), 0);\n\n// Investment value\nconst investmentValue = positions\n  .reduce((sum, p) => sum + (parseFloat(p.current_value) || 0), 0);\n\n// Property value\nconst propertyValue = properties\n  .reduce((sum, p) => sum + (parseFloat(p.current_value) || 0), 0);\n\n// Company value\nconst companyValue = companies\n  .reduce((sum, c) => sum + (parseFloat(c.your_share_value) || 0), 0);\n\n// Total liabilities (loans)\nconst totalLiabilities = loans\n  .reduce((sum, l) => sum + Math.abs(parseFloat(l.current_balance) || 0), 0);\n\n// Total assets\nconst totalAssets = cashValue + investmentValue + propertyValue + companyValue;\n\n// Net worth\nconst netWorth = totalAssets - totalLiabilities;\n\nreturn {\n  date: new Date().toISOString().split('T')[0],\n  total_assets: totalAssets,\n  total_liabilities: totalLiabilities,\n  net_worth: netWorth,\n  cash_value: cashValue,\n  investment_value: investmentValue,\n  property_value: propertyValue,\n  company_value: companyValue\n};"
+      },
+      "id": "calculate-snapshot",
+      "name": "Calculate Snapshot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 350]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "daily_snapshots",
+        "columns": "date,total_assets,total_liabilities,net_worth,cash_value,investment_value,property_value,company_value",
+        "conflictColumns": "date",
+        "options": {}
+      },
+      "id": "save-snapshot",
+      "name": "Save Snapshot",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [900, 350],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const snapshot = $input.first().json;\n\nconst formatter = new Intl.NumberFormat('de-DE', {\n  style: 'currency',\n  currency: 'EUR'\n});\n\n// Check for significant changes\nconst previousSnapshot = await $('Get Previous Snapshot').first()?.json;\nlet changeMsg = '';\n\nif (previousSnapshot) {\n  const change = snapshot.net_worth - previousSnapshot.net_worth;\n  const changePercent = (change / previousSnapshot.net_worth * 100).toFixed(2);\n  const emoji = change >= 0 ? '📈' : '📉';\n  changeMsg = `\\n${emoji} Veränderung: ${formatter.format(change)} (${changePercent}%)`;\n}\n\nreturn {\n  message: `💰 *Täglicher Vermögens-Snapshot*\\n\\n` +\n    `Nettovermögen: ${formatter.format(snapshot.net_worth)}${changeMsg}\\n\\n` +\n    `📊 *Aufschlüsselung:*\\n` +\n    `💵 Cash: ${formatter.format(snapshot.cash_value)}\\n` +\n    `📈 Investments: ${formatter.format(snapshot.investment_value)}\\n` +\n    `🏠 Immobilien: ${formatter.format(snapshot.property_value)}\\n` +\n    `🏢 Firmenbeteiligungen: ${formatter.format(snapshot.company_value)}\\n` +\n    `🏦 Verbindlichkeiten: ${formatter.format(snapshot.total_liabilities)}`,\n  snapshot: snapshot\n};"
+      },
+      "id": "format-message",
+      "name": "Format Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 350]
+    }
+  ],
+  "connections": {
+    "Daily 23:00": {
+      "main": [
+        [
+          {
+            "node": "Get All Accounts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Properties",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Positions",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Companies",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Loans",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All Accounts": {
+      "main": [
+        [
+          {
+            "node": "Calculate Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Properties": {
+      "main": [
+        [
+          {
+            "node": "Calculate Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Positions": {
+      "main": [
+        [
+          {
+            "node": "Calculate Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Companies": {
+      "main": [
+        [
+          {
+            "node": "Calculate Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Loans": {
+      "main": [
+        [
+          {
+            "node": "Calculate Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Snapshot": {
+      "main": [
+        [
+          {
+            "node": "Save Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Snapshot": {
+      "main": [
+        [
+          {
+            "node": "Format Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["wealth", "snapshot", "scheduled"],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-20T00:00:00.000Z",
+  "versionId": "1"
+}
