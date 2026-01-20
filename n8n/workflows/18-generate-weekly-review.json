@@ -1,0 +1,389 @@
+{
+  "name": "18 - Generate Weekly Review",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 18 * * 0"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Sunday 18:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "daily_snapshots",
+        "columns": "snapshot_date, net_worth, total_assets, total_liabilities",
+        "options": {
+          "orderByField": "snapshot_date",
+          "orderByDirection": "DESC",
+          "limit": 7
+        }
+      },
+      "id": "get-snapshots",
+      "name": "Get Week Snapshots",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 100],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "inbox_items",
+        "columns": "id, title, status, completed_at",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "keyValue": "completed"
+            },
+            {
+              "keyName": "completed_at",
+              "condition": "gte",
+              "keyValue": "={{ new Date(Date.now() - 7*24*60*60*1000).toISOString() }}"
+            }
+          ]
+        }
+      },
+      "id": "get-completed",
+      "name": "Get Completed Tasks",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 260],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "garmin_daily_stats",
+        "columns": "date, steps, sleep_score, body_battery_high, average_stress",
+        "options": {
+          "orderByField": "date",
+          "orderByDirection": "DESC",
+          "limit": 7
+        }
+      },
+      "id": "get-health",
+      "name": "Get Health Stats",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 420],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "habit_logs",
+        "columns": "habit_id, completed_at",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "completed_at",
+              "condition": "gte",
+              "keyValue": "={{ new Date(Date.now() - 7*24*60*60*1000).toISOString() }}"
+            }
+          ]
+        }
+      },
+      "id": "get-habits",
+      "name": "Get Habit Logs",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 580],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "workout_logs",
+        "columns": "date, workout_type, duration_minutes",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "date",
+              "condition": "gte",
+              "keyValue": "={{ new Date(Date.now() - 7*24*60*60*1000).toISOString().split('T')[0] }}"
+            }
+          ]
+        }
+      },
+      "id": "get-workouts",
+      "name": "Get Workouts",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 740],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compile weekly data\nconst snapshots = $('Get Week Snapshots').all().map(i => i.json);\nconst completed = $('Get Completed Tasks').all().map(i => i.json);\nconst health = $('Get Health Stats').all().map(i => i.json);\nconst habits = $('Get Habit Logs').all().map(i => i.json);\nconst workouts = $('Get Workouts').all().map(i => i.json);\n\n// Calculate net worth change\nconst latestNetWorth = snapshots[0]?.net_worth || 0;\nconst weekAgoNetWorth = snapshots[snapshots.length - 1]?.net_worth || latestNetWorth;\nconst netWorthChange = latestNetWorth - weekAgoNetWorth;\nconst netWorthChangePercent = weekAgoNetWorth ? (netWorthChange / weekAgoNetWorth * 100) : 0;\n\n// Health averages\nconst avgSteps = health.reduce((sum, d) => sum + (d.steps || 0), 0) / health.length;\nconst avgSleep = health.reduce((sum, d) => sum + (d.sleep_score || 0), 0) / health.length;\nconst avgStress = health.reduce((sum, d) => sum + (d.average_stress || 0), 0) / health.length;\n\n// Workout stats\nconst totalWorkoutMinutes = workouts.reduce((sum, w) => sum + (w.duration_minutes || 0), 0);\n\nreturn [{\n  json: {\n    week_ending: new Date().toISOString().split('T')[0],\n    wealth: {\n      current_net_worth: latestNetWorth,\n      change: netWorthChange,\n      change_percent: netWorthChangePercent\n    },\n    productivity: {\n      tasks_completed: completed.length,\n      habit_completions: habits.length\n    },\n    health: {\n      avg_steps: Math.round(avgSteps),\n      avg_sleep_score: Math.round(avgSleep),\n      avg_stress: Math.round(avgStress),\n      workouts_count: workouts.length,\n      workout_minutes: totalWorkoutMinutes\n    },\n    raw: {\n      snapshots,\n      completed,\n      health,\n      habits,\n      workouts\n    }\n  }\n}];"
+      },
+      "id": "compile-data",
+      "name": "Compile Week Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 400]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Du bist ein Coach, der wöchentliche Reviews erstellt. Sei konstruktiv, motivierend und konkret. Gib 2-3 Verbesserungsvorschläge für die nächste Woche. Schreibe auf Deutsch, nutze Emojis sparsam."
+            },
+            {
+              "role": "user",
+              "content": "=Erstelle einen Wochenrückblick basierend auf diesen Daten:\n\n**WEALTH:**\n- Aktuelles Vermögen: €{{ $json.wealth.current_net_worth.toLocaleString('de-DE') }}\n- Veränderung: {{ $json.wealth.change >= 0 ? '+' : '' }}€{{ $json.wealth.change.toLocaleString('de-DE') }} ({{ $json.wealth.change_percent.toFixed(1) }}%)\n\n**PRODUKTIVITÄT:**\n- {{ $json.productivity.tasks_completed }} Tasks erledigt\n- {{ $json.productivity.habit_completions }} Habit-Einträge\n\n**GESUNDHEIT:**\n- Durchschnitt {{ $json.health.avg_steps.toLocaleString('de-DE') }} Schritte/Tag\n- Schlaf-Score: {{ $json.health.avg_sleep_score }}/100\n- Stress-Level: {{ $json.health.avg_stress }}/100\n- {{ $json.health.workouts_count }} Workouts ({{ $json.health.workout_minutes }} min)\n\nErstelle einen kurzen Rückblick (max 800 Zeichen) mit:\n1. Highlight der Woche\n2. Was gut lief\n3. Verbesserungspotential\n4. Fokus für nächste Woche"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 500,
+          "temperature": 0.7
+        }
+      },
+      "id": "generate-review",
+      "name": "Generate AI Review",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.3,
+      "position": [960, 400],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-creds",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format the weekly review message\nconst data = $('Compile Week Data').first().json;\nconst aiResponse = $input.first().json;\n\nconst reviewText = aiResponse.message?.content || aiResponse.choices?.[0]?.message?.content || 'Review konnte nicht generiert werden.';\n\nconst changeEmoji = data.wealth.change >= 0 ? '📈' : '📉';\n\nlet message = `📊 *Wochenrückblick*\\n`;\nmessage += `━━━━━━━━━━━━━━━━━━\\n\\n`;\n\n// Quick Stats\nmessage += `💰 *Vermögen:* €${data.wealth.current_net_worth.toLocaleString('de-DE')}\\n`;\nmessage += `${changeEmoji} ${data.wealth.change >= 0 ? '+' : ''}€${data.wealth.change.toLocaleString('de-DE')}\\n\\n`;\n\nmessage += `✅ *Erledigt:* ${data.productivity.tasks_completed} Tasks\\n`;\nmessage += `🏃 *Aktivität:* ${data.health.avg_steps.toLocaleString('de-DE')} Steps/Tag\\n`;\nmessage += `💪 *Training:* ${data.health.workouts_count}x (${data.health.workout_minutes} min)\\n\\n`;\n\nmessage += `━━━━━━━━━━━━━━━━━━\\n\\n`;\nmessage += reviewText;\n\nmessage += `\\n\\n━━━━━━━━━━━━━━━━━━\\n`;\nmessage += `Auf eine produktive Woche! 🚀`;\n\nreturn [{\n  json: {\n    message: message,\n    parse_mode: 'Markdown',\n    week_ending: data.week_ending,\n    summary: data\n  }\n}];"
+      },
+      "id": "format-message",
+      "name": "Format Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1180, 400]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send Review",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1400, 400],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-creds",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "weekly_reviews",
+        "columns": "week_ending, summary, ai_review, created_at",
+        "options": {}
+      },
+      "id": "save-review",
+      "name": "Save Review",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1400, 580],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Sunday 18:00": {
+      "main": [
+        [
+          {
+            "node": "Get Week Snapshots",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Completed Tasks",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Health Stats",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Habit Logs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Workouts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Week Snapshots": {
+      "main": [
+        [
+          {
+            "node": "Compile Week Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Completed Tasks": {
+      "main": [
+        [
+          {
+            "node": "Compile Week Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Health Stats": {
+      "main": [
+        [
+          {
+            "node": "Compile Week Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Habit Logs": {
+      "main": [
+        [
+          {
+            "node": "Compile Week Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Workouts": {
+      "main": [
+        [
+          {
+            "node": "Compile Week Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Week Data": {
+      "main": [
+        [
+          {
+            "node": "Generate AI Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate AI Review": {
+      "main": [
+        [
+          {
+            "node": "Format Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Message": {
+      "main": [
+        [
+          {
+            "node": "Send Review",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Save Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "ai-copilot"
+    },
+    {
+      "name": "weekly"
+    }
+  ],
+  "active": false
+}
