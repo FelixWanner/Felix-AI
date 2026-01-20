@@ -1,0 +1,441 @@
+{
+  "name": "Sync Garmin Daily Stats",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 08:00 Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "={{ $json.python_script }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "execute-garth",
+      "name": "Execute Garth Python",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Python script for garth\nconst today = new Date().toISOString().split('T')[0];\n\nconst pythonScript = `\nimport json\nimport os\nimport sys\nfrom datetime import date, datetime\nfrom pathlib import Path\n\ntry:\n    import garth\nexcept ImportError:\n    print(json.dumps({\"error\": \"garth not installed. Run: pip install garth\"}))\n    sys.exit(1)\n\n# Session path for persistence\nSESSION_PATH = Path(os.environ.get('GARMIN_SESSION_PATH', '/app/data/garmin_session'))\n\ndef main():\n    result = {\n        \"date\": \"${today}\",\n        \"success\": False,\n        \"data\": {},\n        \"error\": None\n    }\n    \n    try:\n        # Try to resume existing session\n        if SESSION_PATH.exists():\n            garth.resume(SESSION_PATH)\n        else:\n            # Login with credentials from environment\n            email = os.environ.get('GARMIN_EMAIL')\n            password = os.environ.get('GARMIN_PASSWORD')\n            \n            if not email or not password:\n                result[\"error\"] = \"GARMIN_EMAIL and GARMIN_PASSWORD environment variables required\"\n                print(json.dumps(result))\n                return\n            \n            garth.login(email, password)\n            # Save session for next time\n            SESSION_PATH.parent.mkdir(parents=True, exist_ok=True)\n            garth.save(SESSION_PATH)\n        \n        target_date = date.fromisoformat(\"${today}\")\n        \n        # Fetch Daily Stats\n        try:\n            daily_stats = garth.connectapi(\n                f\"/usersummary-service/usersummary/daily/{target_date.isoformat()}\"\n            )\n            \n            result[\"data\"][\"steps\"] = daily_stats.get(\"totalSteps\", 0)\n            result[\"data\"][\"active_calories\"] = daily_stats.get(\"activeKilocalories\", 0)\n            result[\"data\"][\"total_calories\"] = daily_stats.get(\"totalKilocalories\", 0)\n            result[\"data\"][\"intensity_minutes\"] = (\n                daily_stats.get(\"moderateIntensityMinutes\", 0) + \n                daily_stats.get(\"vigorousIntensityMinutes\", 0)\n            )\n            result[\"data\"][\"floors_climbed\"] = daily_stats.get(\"floorsAscended\", 0)\n            result[\"data\"][\"resting_hr\"] = daily_stats.get(\"restingHeartRate\", None)\n        except Exception as e:\n            result[\"data\"][\"daily_stats_error\"] = str(e)\n        \n        # Fetch Sleep Data\n        try:\n            sleep_data = garth.connectapi(\n                f\"/wellness-service/wellness/dailySleepData/{target_date.isoformat()}\"\n            )\n            \n            if sleep_data:\n                result[\"data\"][\"sleep_score\"] = sleep_data.get(\"overallSleepScore\", {}).get(\"value\", None)\n                result[\"data\"][\"sleep_duration_minutes\"] = round(sleep_data.get(\"sleepTimeSeconds\", 0) / 60)\n                result[\"data\"][\"deep_sleep_minutes\"] = round(sleep_data.get(\"deepSleepSeconds\", 0) / 60)\n                result[\"data\"][\"light_sleep_minutes\"] = round(sleep_data.get(\"lightSleepSeconds\", 0) / 60)\n                result[\"data\"][\"rem_sleep_minutes\"] = round(sleep_data.get(\"remSleepSeconds\", 0) / 60)\n                result[\"data\"][\"awake_minutes\"] = round(sleep_data.get(\"awakeSleepSeconds\", 0) / 60)\n        except Exception as e:\n            result[\"data\"][\"sleep_error\"] = str(e)\n        \n        # Fetch Body Battery\n        try:\n            body_battery = garth.connectapi(\n                f\"/wellness-service/wellness/bodyBattery/days/{target_date.isoformat()}/1\"\n            )\n            \n            if body_battery and len(body_battery) > 0:\n                bb_data = body_battery[0]\n                result[\"data\"][\"body_battery_charged\"] = bb_data.get(\"charged\", 0)\n                result[\"data\"][\"body_battery_drained\"] = bb_data.get(\"drained\", 0)\n                \n                # Get start and end values from timeline if available\n                timeline = bb_data.get(\"bodyBatteryValuesArray\", [])\n                if timeline:\n                    result[\"data\"][\"body_battery_start\"] = timeline[0][1] if timeline[0] else None\n                    result[\"data\"][\"body_battery_end\"] = timeline[-1][1] if timeline[-1] else None\n        except Exception as e:\n            result[\"data\"][\"body_battery_error\"] = str(e)\n        \n        # Fetch Stress Data\n        try:\n            stress_data = garth.connectapi(\n                f\"/wellness-service/wellness/dailyStress/{target_date.isoformat()}\"\n            )\n            \n            if stress_data:\n                result[\"data\"][\"stress_avg\"] = stress_data.get(\"overallStressLevel\", None)\n                result[\"data\"][\"stress_max\"] = stress_data.get(\"maxStressLevel\", None)\n                result[\"data\"][\"rest_stress_minutes\"] = stress_data.get(\"restStressDuration\", 0) // 60\n                result[\"data\"][\"low_stress_minutes\"] = stress_data.get(\"lowStressDuration\", 0) // 60\n                result[\"data\"][\"medium_stress_minutes\"] = stress_data.get(\"mediumStressDuration\", 0) // 60\n                result[\"data\"][\"high_stress_minutes\"] = stress_data.get(\"highStressDuration\", 0) // 60\n        except Exception as e:\n            result[\"data\"][\"stress_error\"] = str(e)\n        \n        # Fetch HRV Data\n        try:\n            hrv_data = garth.connectapi(\n                f\"/hrv-service/hrv/{target_date.isoformat()}\"\n            )\n            \n            if hrv_data:\n                result[\"data\"][\"hrv_value\"] = hrv_data.get(\"hrvValue\", None)\n                status = hrv_data.get(\"status\", None)\n                if status:\n                    # Map status to our enum\n                    status_map = {\n                        \"BALANCED\": \"balanced\",\n                        \"HIGH\": \"high\", \n                        \"LOW\": \"low\",\n                        \"POOR\": \"low\"\n                    }\n                    result[\"data\"][\"hrv_status\"] = status_map.get(status.upper(), \"balanced\")\n        except Exception as e:\n            result[\"data\"][\"hrv_error\"] = str(e)\n        \n        result[\"success\"] = True\n        \n    except garth.exc.GarthHTTPError as e:\n        if \"401\" in str(e):\n            # Session expired, delete and retry\n            if SESSION_PATH.exists():\n                SESSION_PATH.unlink()\n            result[\"error\"] = \"Session expired. Will re-authenticate on next run.\"\n        else:\n            result[\"error\"] = f\"Garmin API error: {str(e)}\"\n    except Exception as e:\n        result[\"error\"] = f\"Unexpected error: {str(e)}\"\n    \n    print(json.dumps(result))\n\nif __name__ == \"__main__\":\n    main()\n`;\n\nreturn {\n  python_script: \\`python3 -c '\\${pythonScript.replace(/'/g, \"'\\\\\"'\\\\\"'\")}'\\`\n};"
+      },
+      "id": "prepare-script",
+      "name": "Prepare Python Script",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the Python output\nconst stdout = $input.first().json.stdout || '';\nconst stderr = $input.first().json.stderr || '';\n\ntry {\n  // Find JSON in output (might have other text before/after)\n  const jsonMatch = stdout.match(/\\{[\\s\\S]*\\}/);\n  if (!jsonMatch) {\n    return {\n      success: false,\n      error: `No JSON output found. stdout: ${stdout}, stderr: ${stderr}`\n    };\n  }\n  \n  const result = JSON.parse(jsonMatch[0]);\n  \n  if (result.error) {\n    return {\n      success: false,\n      error: result.error\n    };\n  }\n  \n  return {\n    success: result.success,\n    date: result.date,\n    ...result.data\n  };\n  \n} catch (e) {\n  return {\n    success: false,\n    error: `Failed to parse output: ${e.message}. stdout: ${stdout}, stderr: ${stderr}`\n  };\n}"
+      },
+      "id": "parse-output",
+      "name": "Parse Garth Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-success",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-success",
+      "name": "Garth Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO garmin_daily_stats (\n  date,\n  sleep_score,\n  sleep_duration_minutes,\n  deep_sleep_minutes,\n  light_sleep_minutes,\n  rem_sleep_minutes,\n  awake_minutes,\n  body_battery_start,\n  body_battery_end,\n  body_battery_charged,\n  body_battery_drained,\n  stress_avg,\n  stress_max,\n  rest_stress_minutes,\n  low_stress_minutes,\n  medium_stress_minutes,\n  high_stress_minutes,\n  steps,\n  active_calories,\n  total_calories,\n  intensity_minutes,\n  floors_climbed,\n  resting_hr,\n  hrv_status,\n  hrv_value,\n  synced_at\n) VALUES (\n  '{{ $json.date }}',\n  {{ $json.sleep_score || 'NULL' }},\n  {{ $json.sleep_duration_minutes || 'NULL' }},\n  {{ $json.deep_sleep_minutes || 'NULL' }},\n  {{ $json.light_sleep_minutes || 'NULL' }},\n  {{ $json.rem_sleep_minutes || 'NULL' }},\n  {{ $json.awake_minutes || 'NULL' }},\n  {{ $json.body_battery_start || 'NULL' }},\n  {{ $json.body_battery_end || 'NULL' }},\n  {{ $json.body_battery_charged || 'NULL' }},\n  {{ $json.body_battery_drained || 'NULL' }},\n  {{ $json.stress_avg || 'NULL' }},\n  {{ $json.stress_max || 'NULL' }},\n  {{ $json.rest_stress_minutes || 'NULL' }},\n  {{ $json.low_stress_minutes || 'NULL' }},\n  {{ $json.medium_stress_minutes || 'NULL' }},\n  {{ $json.high_stress_minutes || 'NULL' }},\n  {{ $json.steps || 0 }},\n  {{ $json.active_calories || 0 }},\n  {{ $json.total_calories || 0 }},\n  {{ $json.intensity_minutes || 0 }},\n  {{ $json.floors_climbed || 0 }},\n  {{ $json.resting_hr || 'NULL' }},\n  {{ $json.hrv_status ? \"'\" + $json.hrv_status + \"'\" : 'NULL' }},\n  {{ $json.hrv_value || 'NULL' }},\n  NOW()\n)\nON CONFLICT (date) DO UPDATE SET\n  sleep_score = COALESCE(EXCLUDED.sleep_score, garmin_daily_stats.sleep_score),\n  sleep_duration_minutes = COALESCE(EXCLUDED.sleep_duration_minutes, garmin_daily_stats.sleep_duration_minutes),\n  deep_sleep_minutes = COALESCE(EXCLUDED.deep_sleep_minutes, garmin_daily_stats.deep_sleep_minutes),\n  light_sleep_minutes = COALESCE(EXCLUDED.light_sleep_minutes, garmin_daily_stats.light_sleep_minutes),\n  rem_sleep_minutes = COALESCE(EXCLUDED.rem_sleep_minutes, garmin_daily_stats.rem_sleep_minutes),\n  awake_minutes = COALESCE(EXCLUDED.awake_minutes, garmin_daily_stats.awake_minutes),\n  body_battery_start = COALESCE(EXCLUDED.body_battery_start, garmin_daily_stats.body_battery_start),\n  body_battery_end = COALESCE(EXCLUDED.body_battery_end, garmin_daily_stats.body_battery_end),\n  body_battery_charged = COALESCE(EXCLUDED.body_battery_charged, garmin_daily_stats.body_battery_charged),\n  body_battery_drained = COALESCE(EXCLUDED.body_battery_drained, garmin_daily_stats.body_battery_drained),\n  stress_avg = COALESCE(EXCLUDED.stress_avg, garmin_daily_stats.stress_avg),\n  stress_max = COALESCE(EXCLUDED.stress_max, garmin_daily_stats.stress_max),\n  rest_stress_minutes = COALESCE(EXCLUDED.rest_stress_minutes, garmin_daily_stats.rest_stress_minutes),\n  low_stress_minutes = COALESCE(EXCLUDED.low_stress_minutes, garmin_daily_stats.low_stress_minutes),\n  medium_stress_minutes = COALESCE(EXCLUDED.medium_stress_minutes, garmin_daily_stats.medium_stress_minutes),\n  high_stress_minutes = COALESCE(EXCLUDED.high_stress_minutes, garmin_daily_stats.high_stress_minutes),\n  steps = COALESCE(EXCLUDED.steps, garmin_daily_stats.steps),\n  active_calories = COALESCE(EXCLUDED.active_calories, garmin_daily_stats.active_calories),\n  total_calories = COALESCE(EXCLUDED.total_calories, garmin_daily_stats.total_calories),\n  intensity_minutes = COALESCE(EXCLUDED.intensity_minutes, garmin_daily_stats.intensity_minutes),\n  floors_climbed = COALESCE(EXCLUDED.floors_climbed, garmin_daily_stats.floors_climbed),\n  resting_hr = COALESCE(EXCLUDED.resting_hr, garmin_daily_stats.resting_hr),\n  hrv_status = COALESCE(EXCLUDED.hrv_status, garmin_daily_stats.hrv_status),\n  hrv_value = COALESCE(EXCLUDED.hrv_value, garmin_daily_stats.hrv_value),\n  synced_at = NOW()\nRETURNING *",
+        "options": {}
+      },
+      "id": "upsert-garmin-data",
+      "name": "Upsert Garmin Data",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1340, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT update_daily_readiness('{{ $('Parse Garth Output').item.json.date }}'::DATE)",
+        "options": {}
+      },
+      "id": "update-readiness",
+      "name": "Update Daily Readiness",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1560, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_status (id, source, entity_type, last_sync_at, status, records_synced)\nVALUES (gen_random_uuid(), 'garmin', 'daily_stats', NOW(), 'success', 1)\nON CONFLICT (source, entity_type) DO UPDATE SET\n  last_sync_at = NOW(),\n  status = 'success',\n  records_synced = 1,\n  error_message = NULL",
+        "options": {}
+      },
+      "id": "update-sync-success",
+      "name": "Update Sync Status (Success)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1780, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-poor-sleep",
+              "leftValue": "={{ $('Upsert Garmin Data').item.json.sleep_score }}",
+              "rightValue": 70,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-poor-sleep",
+      "name": "Poor Sleep Score?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2000, 200]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "=:warning: **Schlechter Schlaf Alert!**\n\nDein Sleep Score heute: **{{ $('Upsert Garmin Data').item.json.sleep_score }}/100**\n\n:crescent_moon: Schlafdauer: {{ Math.floor($('Upsert Garmin Data').item.json.sleep_duration_minutes / 60) }}h {{ $('Upsert Garmin Data').item.json.sleep_duration_minutes % 60 }}min\n:purple_circle: Tiefschlaf: {{ $('Upsert Garmin Data').item.json.deep_sleep_minutes || 0 }} min\n:blue_circle: Leichtschlaf: {{ $('Upsert Garmin Data').item.json.light_sleep_minutes || 0 }} min\n:large_blue_circle: REM: {{ $('Upsert Garmin Data').item.json.rem_sleep_minutes || 0 }} min\n:red_circle: Wach: {{ $('Upsert Garmin Data').item.json.awake_minutes || 0 }} min\n\n**Empfehlungen:**\n- Heute leichtes Training oder Ruhetag\n- Frueher ins Bett gehen\n- Koffein vor 14 Uhr vermeiden\n- Abends auf Bildschirme verzichten",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-poor-sleep",
+      "name": "Send Poor Sleep Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2220, 100],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Life OS Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "=:white_check_mark: **Garmin Sync Complete**\n\n:sleeping: Sleep: {{ $('Upsert Garmin Data').item.json.sleep_score || 'N/A' }}/100\n:battery: Body Battery: {{ $('Upsert Garmin Data').item.json.body_battery_start || 'N/A' }}%\n:chart_with_downwards_trend: Stress: {{ $('Upsert Garmin Data').item.json.stress_avg || 'N/A' }}\n:footprints: Steps: {{ $('Upsert Garmin Data').item.json.steps?.toLocaleString() || '0' }}\n:heart: Resting HR: {{ $('Upsert Garmin Data').item.json.resting_hr || 'N/A' }} bpm\n:heartpulse: HRV: {{ $('Upsert Garmin Data').item.json.hrv_value || 'N/A' }} ms ({{ $('Upsert Garmin Data').item.json.hrv_status || 'N/A' }})",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-success",
+      "name": "Send Telegram Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2220, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Life OS Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_status (id, source, entity_type, last_sync_at, status, error_message)\nVALUES (gen_random_uuid(), 'garmin', 'daily_stats', NOW(), 'error', '{{ $json.error }}')\nON CONFLICT (source, entity_type) DO UPDATE SET\n  last_sync_at = NOW(),\n  status = 'error',\n  error_message = '{{ $json.error }}'",
+        "options": {}
+      },
+      "id": "update-sync-error",
+      "name": "Update Sync Status (Error)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1340, 400],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "=:warning: **Garmin Sync Failed**\n\nTime: {{ $now.toISO() }}\nError: {{ $json.error }}\n\nPlease check credentials and n8n workflow logs.",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-error",
+      "name": "Send Telegram Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1560, 400],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Life OS Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "no-op-end",
+      "name": "End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2440, 300]
+    }
+  ],
+  "connections": {
+    "Daily 08:00 Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Python Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Python Script": {
+      "main": [
+        [
+          {
+            "node": "Execute Garth Python",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Garth Python": {
+      "main": [
+        [
+          {
+            "node": "Parse Garth Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Garth Output": {
+      "main": [
+        [
+          {
+            "node": "Garth Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Garth Success?": {
+      "main": [
+        [
+          {
+            "node": "Upsert Garmin Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Sync Status (Error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Garmin Data": {
+      "main": [
+        [
+          {
+            "node": "Update Daily Readiness",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Daily Readiness": {
+      "main": [
+        [
+          {
+            "node": "Update Sync Status (Success)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sync Status (Success)": {
+      "main": [
+        [
+          {
+            "node": "Poor Sleep Score?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poor Sleep Score?": {
+      "main": [
+        [
+          {
+            "node": "Send Poor Sleep Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Telegram Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Poor Sleep Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Summary": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sync Status (Error)": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Error": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "2",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "life-os"
+  },
+  "tags": [
+    {
+      "name": "health",
+      "id": "health-tag"
+    },
+    {
+      "name": "sync",
+      "id": "sync-tag"
+    },
+    {
+      "name": "garmin",
+      "id": "garmin-tag"
+    }
+  ],
+  "pinData": {},
+  "staticData": null,
+  "triggerCount": 0
+}

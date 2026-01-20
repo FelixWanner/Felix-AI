@@ -1,0 +1,437 @@
+{
+  "name": "Sync BHB Accounts",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 06:00 Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://app.buchhaltungsbutler.de/api/v1/accounts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_key",
+              "value": "={{ $credentials.bhbApiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "http-bhb-accounts",
+      "name": "Fetch BHB Accounts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "bhb-basic-auth",
+          "name": "BHB Basic Auth"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-success",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-success",
+      "name": "Check API Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "id": "split-accounts",
+      "name": "Split Accounts",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM accounts WHERE bhb_account_id = '{{ $json.id }}'",
+        "options": {}
+      },
+      "id": "check-existing",
+      "name": "Check Existing Account",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1120, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-exists",
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-exists",
+      "name": "Account Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE accounts SET name = '{{ $('Split Accounts').item.json.name }}', current_balance = {{ $('Split Accounts').item.json.balance || 0 }}, account_number = '{{ $('Split Accounts').item.json.account_number || '' }}', iban = '{{ $('Split Accounts').item.json.iban || '' }}', updated_at = NOW() WHERE bhb_account_id = '{{ $('Split Accounts').item.json.id }}'",
+        "options": {}
+      },
+      "id": "update-account",
+      "name": "Update Account",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1560, 100],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO accounts (id, name, bhb_account_id, current_balance, account_number, iban, account_type, is_active, created_at, updated_at) VALUES (gen_random_uuid(), '{{ $('Split Accounts').item.json.name }}', '{{ $('Split Accounts').item.json.id }}', {{ $('Split Accounts').item.json.balance || 0 }}, '{{ $('Split Accounts').item.json.account_number || '' }}', '{{ $('Split Accounts').item.json.iban || '' }}', '{{ $('Split Accounts').item.json.type || 'girokonto' }}', true, NOW(), NOW())",
+        "options": {}
+      },
+      "id": "insert-account",
+      "name": "Insert Account",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1560, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_status (id, source, entity_type, last_sync_at, status, records_synced) VALUES (gen_random_uuid(), 'buchhaltungsbutler', 'accounts', NOW(), 'success', {{ $('Split Accounts').all().length }}) ON CONFLICT (source, entity_type) DO UPDATE SET last_sync_at = NOW(), status = 'success', records_synced = {{ $('Split Accounts').all().length }}, error_message = NULL",
+        "options": {}
+      },
+      "id": "update-sync-status-success",
+      "name": "Update Sync Status (Success)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1780, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_status (id, source, entity_type, last_sync_at, status, error_message) VALUES (gen_random_uuid(), 'buchhaltungsbutler', 'accounts', NOW(), 'error', '{{ $json.message || \"Unknown error\" }}') ON CONFLICT (source, entity_type) DO UPDATE SET last_sync_at = NOW(), status = 'error', error_message = '{{ $json.message || \"Unknown error\" }}'",
+        "options": {}
+      },
+      "id": "update-sync-status-error",
+      "name": "Update Sync Status (Error)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [900, 400],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "=:warning: **BHB Accounts Sync Failed**\n\nTime: {{ $now.toISO() }}\nError: {{ $json.message || 'Unknown error' }}\n\nPlease check the n8n workflow logs.",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-error",
+      "name": "Send Telegram Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1120, 400],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Life OS Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "merge-results",
+      "name": "Merge Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1780, 100]
+    },
+    {
+      "parameters": {},
+      "id": "no-op-end",
+      "name": "End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2000, 200]
+    }
+  ],
+  "connections": {
+    "Daily 06:00 Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch BHB Accounts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch BHB Accounts": {
+      "main": [
+        [
+          {
+            "node": "Check API Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Sync Status (Error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check API Success": {
+      "main": [
+        [
+          {
+            "node": "Split Accounts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Sync Status (Error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Accounts": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Account",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Account": {
+      "main": [
+        [
+          {
+            "node": "Account Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Account Exists?": {
+      "main": [
+        [
+          {
+            "node": "Update Account",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert Account",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Account": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Account": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Results": {
+      "main": [
+        [
+          {
+            "node": "Update Sync Status (Success)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sync Status (Success)": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sync Status (Error)": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Error": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "life-os"
+  },
+  "tags": [
+    {
+      "name": "wealth",
+      "id": "wealth-tag"
+    },
+    {
+      "name": "sync",
+      "id": "sync-tag"
+    },
+    {
+      "name": "buchhaltungsbutler",
+      "id": "bhb-tag"
+    }
+  ],
+  "pinData": {},
+  "staticData": null,
+  "triggerCount": 0
+}

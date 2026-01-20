@@ -1,0 +1,700 @@
+{
+  "name": "Sync GMI Invoices",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 06:30 Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT last_sync_at FROM sync_status WHERE source = 'getmyinvoices' AND entity_type = 'invoices' LIMIT 1",
+        "options": {}
+      },
+      "id": "get-last-sync",
+      "name": "Get Last Sync Date",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Calculate date for GMI API\nconst lastSync = $input.item.json.last_sync_at;\nconst now = new Date();\n\n// Default to 30 days ago if no last sync\nlet fromDate;\nif (lastSync) {\n  fromDate = new Date(lastSync);\n  // Go back 1 day to catch any late documents\n  fromDate.setDate(fromDate.getDate() - 1);\n} else {\n  fromDate = new Date();\n  fromDate.setDate(fromDate.getDate() - 30);\n}\n\n// Format as ISO string for GMI API\nreturn {\n  json: {\n    created_since: fromDate.toISOString(),\n    last_sync: lastSync || null\n  }\n};"
+      },
+      "id": "calculate-date",
+      "name": "Calculate Sync Date",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.getmyinvoices.com/accounts/v3/documents",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "created_since",
+              "value": "={{ $json.created_since }}"
+            },
+            {
+              "name": "limit",
+              "value": "100"
+            },
+            {
+              "name": "include_file_content",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "http-gmi-documents",
+      "name": "Fetch GMI Documents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "gmi-api-key",
+          "name": "GMI API Key"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-success",
+              "leftValue": "={{ $json.statusCode || 200 }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-success",
+      "name": "Check API Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-has-data",
+              "leftValue": "={{ $json.records?.length || $json.documents?.length || $json.data?.length || 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-documents",
+      "name": "Has Documents?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Extract documents array from GMI response\nconst response = $input.item.json;\n\n// GMI API may return data in different formats\nlet documents = response.records || response.documents || response.data || [];\n\nif (!Array.isArray(documents)) {\n  documents = [documents];\n}\n\nreturn documents.map(doc => ({ json: doc }));"
+      },
+      "id": "extract-documents",
+      "name": "Extract Documents",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 100]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Transform GMI document to Supabase invoice format\nconst doc = $input.item.json;\n\n// Parse amount - GMI may provide it in different formats\nconst parseAmount = (val) => {\n  if (!val) return 0;\n  if (typeof val === 'number') return val;\n  // Handle German format: 1.234,56 -> 1234.56\n  return parseFloat(String(val).replace(/\\./g, '').replace(',', '.')) || 0;\n};\n\n// Parse date\nconst parseDate = (val) => {\n  if (!val) return null;\n  const date = new Date(val);\n  return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];\n};\n\n// Determine invoice type\nconst getInvoiceType = (doc) => {\n  const docType = (doc.document_type || doc.type || '').toLowerCase();\n  if (docType.includes('eingang') || docType.includes('incoming') || docType.includes('lieferant')) {\n    return 'eingang';\n  }\n  if (docType.includes('ausgang') || docType.includes('outgoing') || docType.includes('kunde')) {\n    return 'ausgang';\n  }\n  return 'sonstige';\n};\n\n// Determine payment status\nconst getPaymentStatus = (doc) => {\n  const status = (doc.payment_status || doc.status || '').toLowerCase();\n  if (status.includes('paid') || status.includes('bezahlt')) return 'bezahlt';\n  if (status.includes('partial') || status.includes('teil')) return 'teilweise_bezahlt';\n  if (status.includes('overdue') || status.includes('überfällig')) return 'überfällig';\n  return 'offen';\n};\n\nreturn {\n  json: {\n    gmi_document_id: doc.id || doc.document_id,\n    invoice_number: doc.invoice_number || doc.document_number || null,\n    invoice_date: parseDate(doc.invoice_date || doc.document_date || doc.date),\n    due_date: parseDate(doc.due_date || doc.payment_due_date),\n    gross_amount: parseAmount(doc.gross_amount || doc.total_gross || doc.amount),\n    net_amount: parseAmount(doc.net_amount || doc.total_net),\n    tax_amount: parseAmount(doc.tax_amount || doc.vat_amount),\n    currency: doc.currency || 'EUR',\n    vendor_name: doc.sender_name || doc.supplier_name || doc.vendor || null,\n    vendor_id: doc.sender_id || doc.supplier_id || null,\n    customer_name: doc.recipient_name || doc.customer_name || null,\n    invoice_type: getInvoiceType(doc),\n    payment_status: getPaymentStatus(doc),\n    category: doc.category || doc.expense_category || null,\n    tags: doc.tags || [],\n    pdf_url: doc.file_url || doc.download_url || doc.pdf_url || null,\n    thumbnail_url: doc.thumbnail_url || doc.preview_url || null,\n    ocr_text: doc.ocr_text || doc.extracted_text || null,\n    notes: doc.notes || doc.description || null,\n    created_at_gmi: doc.created_at || doc.upload_date,\n    is_new: true\n  }\n};"
+      },
+      "id": "transform-document",
+      "name": "Transform Document",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM invoices WHERE gmi_document_id = '{{ $json.gmi_document_id }}'",
+        "options": {}
+      },
+      "id": "check-existing",
+      "name": "Check Existing Invoice",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2000, 100],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-exists",
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-exists",
+      "name": "Invoice Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2220, 100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE invoices SET invoice_number = {{ $('Transform Document').item.json.invoice_number ? \"'\" + $('Transform Document').item.json.invoice_number + \"'\" : 'invoice_number' }}, invoice_date = {{ $('Transform Document').item.json.invoice_date ? \"'\" + $('Transform Document').item.json.invoice_date + \"'\" : 'invoice_date' }}, due_date = {{ $('Transform Document').item.json.due_date ? \"'\" + $('Transform Document').item.json.due_date + \"'\" : 'due_date' }}, gross_amount = {{ $('Transform Document').item.json.gross_amount }}, net_amount = {{ $('Transform Document').item.json.net_amount || 'net_amount' }}, tax_amount = {{ $('Transform Document').item.json.tax_amount || 'tax_amount' }}, vendor_name = {{ $('Transform Document').item.json.vendor_name ? \"'\" + $('Transform Document').item.json.vendor_name.replace(/'/g, \"''\") + \"'\" : 'vendor_name' }}, payment_status = '{{ $('Transform Document').item.json.payment_status }}', pdf_url = {{ $('Transform Document').item.json.pdf_url ? \"'\" + $('Transform Document').item.json.pdf_url + \"'\" : 'pdf_url' }}, updated_at = NOW() WHERE gmi_document_id = '{{ $('Transform Document').item.json.gmi_document_id }}'",
+        "options": {}
+      },
+      "id": "update-invoice",
+      "name": "Update Invoice",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2440, 0],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO invoices (id, gmi_document_id, invoice_number, invoice_date, due_date, gross_amount, net_amount, tax_amount, currency, vendor_name, customer_name, invoice_type, payment_status, category, pdf_url, notes, created_at, updated_at) VALUES (gen_random_uuid(), '{{ $('Transform Document').item.json.gmi_document_id }}', {{ $('Transform Document').item.json.invoice_number ? \"'\" + $('Transform Document').item.json.invoice_number + \"'\" : 'NULL' }}, {{ $('Transform Document').item.json.invoice_date ? \"'\" + $('Transform Document').item.json.invoice_date + \"'\" : 'NULL' }}, {{ $('Transform Document').item.json.due_date ? \"'\" + $('Transform Document').item.json.due_date + \"'\" : 'NULL' }}, {{ $('Transform Document').item.json.gross_amount }}, {{ $('Transform Document').item.json.net_amount || 'NULL' }}, {{ $('Transform Document').item.json.tax_amount || 'NULL' }}, '{{ $('Transform Document').item.json.currency }}', {{ $('Transform Document').item.json.vendor_name ? \"'\" + $('Transform Document').item.json.vendor_name.replace(/'/g, \"''\") + \"'\" : 'NULL' }}, {{ $('Transform Document').item.json.customer_name ? \"'\" + $('Transform Document').item.json.customer_name.replace(/'/g, \"''\") + \"'\" : 'NULL' }}, '{{ $('Transform Document').item.json.invoice_type }}', '{{ $('Transform Document').item.json.payment_status }}', {{ $('Transform Document').item.json.category ? \"'\" + $('Transform Document').item.json.category + \"'\" : 'NULL' }}, {{ $('Transform Document').item.json.pdf_url ? \"'\" + $('Transform Document').item.json.pdf_url + \"'\" : 'NULL' }}, {{ $('Transform Document').item.json.notes ? \"'\" + $('Transform Document').item.json.notes.replace(/'/g, \"''\") + \"'\" : 'NULL' }}, NOW(), NOW()) RETURNING id",
+        "options": {}
+      },
+      "id": "insert-invoice",
+      "name": "Insert Invoice",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2440, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "should-download-pdf",
+              "leftValue": "={{ $('Transform Document').item.json.pdf_url }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-pdf",
+      "name": "Has PDF URL?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2660, 200],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Transform Document').item.json.pdf_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "download-pdf",
+      "name": "Download PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2880, 100],
+      "disabled": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "gmi-api-key",
+          "name": "GMI API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "bucketName": "invoices",
+        "fileName": "={{ $('Transform Document').item.json.gmi_document_id }}.pdf",
+        "additionalFields": {
+          "contentType": "application/pdf",
+          "upsert": true
+        }
+      },
+      "id": "upload-to-storage",
+      "name": "Upload to Supabase Storage",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [3100, 100],
+      "disabled": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-api",
+          "name": "Supabase API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "=:page_facing_up: **Neue Rechnung eingegangen**\n\n:office: Lieferant: {{ $('Transform Document').item.json.vendor_name || 'Unbekannt' }}\n:receipt: Nummer: {{ $('Transform Document').item.json.invoice_number || '-' }}\n:euro: Betrag: {{ $('Transform Document').item.json.gross_amount.toFixed(2) }} {{ $('Transform Document').item.json.currency }}\n:calendar: Datum: {{ $('Transform Document').item.json.invoice_date || '-' }}\n:hourglass: Fällig: {{ $('Transform Document').item.json.due_date || '-' }}\n\n{{ $('Transform Document').item.json.pdf_url ? '[PDF anzeigen](' + $('Transform Document').item.json.pdf_url + ')' : '' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "disable_notification": false
+        }
+      },
+      "id": "telegram-new-invoice",
+      "name": "Notify New Invoice",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2660, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Life OS Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "merge-results",
+      "name": "Merge Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [2880, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_status (id, source, entity_type, last_sync_at, status, records_synced) VALUES (gen_random_uuid(), 'getmyinvoices', 'invoices', NOW(), 'success', {{ $('Extract Documents').all().length }}) ON CONFLICT (source, entity_type) DO UPDATE SET last_sync_at = NOW(), status = 'success', records_synced = {{ $('Extract Documents').all().length }}, error_message = NULL",
+        "options": {}
+      },
+      "id": "update-sync-status-success",
+      "name": "Update Sync Status (Success)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3100, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_status (id, source, entity_type, last_sync_at, status, records_synced) VALUES (gen_random_uuid(), 'getmyinvoices', 'invoices', NOW(), 'success', 0) ON CONFLICT (source, entity_type) DO UPDATE SET last_sync_at = NOW(), status = 'success', records_synced = 0, error_message = NULL",
+        "options": {}
+      },
+      "id": "update-sync-status-no-data",
+      "name": "Update Sync Status (No Data)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1560, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_status (id, source, entity_type, last_sync_at, status, error_message) VALUES (gen_random_uuid(), 'getmyinvoices', 'invoices', NOW(), 'error', '{{ $json.message || $json.error || \"Unknown error\" }}') ON CONFLICT (source, entity_type) DO UPDATE SET last_sync_at = NOW(), status = 'error', error_message = '{{ $json.message || $json.error || \"Unknown error\" }}'",
+        "options": {}
+      },
+      "id": "update-sync-status-error",
+      "name": "Update Sync Status (Error)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1340, 500],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "=:warning: **GMI Invoices Sync Failed**\n\nTime: {{ $now.toISO() }}\nError: {{ $json.message || $json.error || 'Unknown error' }}\n\nPlease check the n8n workflow logs.",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-error",
+      "name": "Send Telegram Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1560, 500],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Life OS Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "no-op-end",
+      "name": "End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [3320, 300]
+    }
+  ],
+  "connections": {
+    "Daily 06:30 Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Last Sync Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Last Sync Date": {
+      "main": [
+        [
+          {
+            "node": "Calculate Sync Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Sync Date": {
+      "main": [
+        [
+          {
+            "node": "Fetch GMI Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch GMI Documents": {
+      "main": [
+        [
+          {
+            "node": "Check API Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Sync Status (Error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check API Success": {
+      "main": [
+        [
+          {
+            "node": "Has Documents?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Sync Status (Error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Documents?": {
+      "main": [
+        [
+          {
+            "node": "Extract Documents",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Sync Status (No Data)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Documents": {
+      "main": [
+        [
+          {
+            "node": "Transform Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Document": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Invoice": {
+      "main": [
+        [
+          {
+            "node": "Invoice Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invoice Exists?": {
+      "main": [
+        [
+          {
+            "node": "Update Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Invoice": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Invoice": {
+      "main": [
+        [
+          {
+            "node": "Notify New Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify New Invoice": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Results": {
+      "main": [
+        [
+          {
+            "node": "Update Sync Status (Success)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sync Status (Success)": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sync Status (No Data)": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sync Status (Error)": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Error": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "life-os"
+  },
+  "tags": [
+    {
+      "name": "wealth",
+      "id": "wealth-tag"
+    },
+    {
+      "name": "sync",
+      "id": "sync-tag"
+    },
+    {
+      "name": "getmyinvoices",
+      "id": "gmi-tag"
+    }
+  ],
+  "pinData": {},
+  "staticData": null,
+  "triggerCount": 0
+}
