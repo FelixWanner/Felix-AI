@@ -1,8 +1,6 @@
 # Life OS - Docker Compose Stack
 # Includes: Supabase (self-hosted), n8n, Frontend, Caddy
 
-version: "3.8"
-
 services:
   # ═══════════════════════════════════════════════════════════════
   # REVERSE PROXY - Caddy
