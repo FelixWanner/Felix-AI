@@ -1,0 +1,220 @@
+{
+  "name": "10 - Process Plaud Meeting",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "plaud-meeting",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "plaud-meeting"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Plaud meeting data\nconst webhook = $input.first().json;\n\n// Extract meeting details\nconst meeting = {\n  external_id: `plaud_${webhook.meeting_id || webhook.id || Date.now()}`,\n  title: webhook.title || webhook.meeting_title || 'Untitled Meeting',\n  date: webhook.date || webhook.meeting_date || new Date().toISOString(),\n  duration_minutes: webhook.duration || webhook.duration_minutes || 0,\n  participants: webhook.participants || [],\n  transcript: webhook.transcript || webhook.transcription || '',\n  summary: webhook.summary || '',\n  action_items: webhook.action_items || webhook.actionItems || [],\n  key_points: webhook.key_points || webhook.keyPoints || [],\n  audio_url: webhook.audio_url || webhook.recording_url || null,\n  source: 'plaud'\n};\n\nreturn [{ json: meeting }];"
+      },
+      "id": "parse-webhook",
+      "name": "Parse Meeting Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "meetings",
+        "columns": "external_id, title, date, duration_minutes, participants, transcript, summary, action_items, key_points, audio_url, source",
+        "conflictColumns": "external_id",
+        "options": {}
+      },
+      "id": "save-meeting",
+      "name": "Save Meeting",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create inbox items from action items\nconst meeting = $('Parse Meeting Data').first().json;\nconst actionItems = meeting.action_items || [];\n\nconst inboxItems = [];\n\n// Create main meeting summary inbox item\ninboxItems.push({\n  json: {\n    source: 'plaud',\n    source_id: `${meeting.external_id}_summary`,\n    item_type: 'meeting_notes',\n    title: `Meeting: ${meeting.title}`,\n    content: `**Date:** ${new Date(meeting.date).toLocaleDateString('de-DE')}\\n**Duration:** ${meeting.duration_minutes} min\\n\\n**Summary:**\\n${meeting.summary}\\n\\n**Key Points:**\\n${meeting.key_points.map(p => `• ${p}`).join('\\n')}`,\n    priority: 'medium',\n    status: 'pending'\n  }\n});\n\n// Create individual action items\nfor (let i = 0; i < actionItems.length; i++) {\n  const item = actionItems[i];\n  inboxItems.push({\n    json: {\n      source: 'plaud',\n      source_id: `${meeting.external_id}_action_${i}`,\n      item_type: 'task',\n      title: typeof item === 'string' ? item : (item.task || item.title || item.description),\n      content: `From meeting: ${meeting.title}\\n\\nAssignee: ${item.assignee || 'Unassigned'}\\nDue: ${item.due_date || 'Not specified'}`,\n      priority: item.priority || 'medium',\n      status: 'pending',\n      due_date: item.due_date || null\n    }\n  });\n}\n\nreturn inboxItems;"
+      },
+      "id": "create-inbox-items",
+      "name": "Create Inbox Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "inbox_items",
+        "columns": "source, source_id, item_type, title, content, priority, status, due_date",
+        "conflictColumns": "source_id",
+        "options": {}
+      },
+      "id": "insert-inbox",
+      "name": "Insert Inbox Items",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1120, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Telegram notification\nconst meeting = $('Parse Meeting Data').first().json;\nconst itemCount = $input.all().length;\n\nlet message = `📝 *Neues Meeting verarbeitet*\\n\\n`;\nmessage += `📋 *${meeting.title}*\\n`;\nmessage += `📅 ${new Date(meeting.date).toLocaleDateString('de-DE')}\\n`;\nmessage += `⏱ ${meeting.duration_minutes} Minuten\\n\\n`;\n\nif (meeting.summary) {\n  message += `📌 *Zusammenfassung:*\\n${meeting.summary.substring(0, 300)}${meeting.summary.length > 300 ? '...' : ''}\\n\\n`;\n}\n\nif (meeting.action_items && meeting.action_items.length > 0) {\n  message += `✅ *${meeting.action_items.length} Action Items* erstellt\\n`;\n}\n\nmessage += `\\n→ ${itemCount} Items im Inbox`;\n\nreturn [{\n  json: {\n    message: message,\n    parse_mode: 'Markdown'\n  }\n}];"
+      },
+      "id": "prepare-notification",
+      "name": "Prepare Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1560, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-creds",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "success"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "respond-webhook",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [1780, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Meeting Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Meeting Data": {
+      "main": [
+        [
+          {
+            "node": "Save Meeting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Meeting": {
+      "main": [
+        [
+          {
+            "node": "Create Inbox Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Inbox Items": {
+      "main": [
+        [
+          {
+            "node": "Insert Inbox Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Inbox Items": {
+      "main": [
+        [
+          {
+            "node": "Prepare Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Notification": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "productivity"
+    },
+    {
+      "name": "webhook"
+    }
+  ],
+  "active": false
+}

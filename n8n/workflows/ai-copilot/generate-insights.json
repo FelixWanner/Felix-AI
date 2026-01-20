@@ -1,0 +1,762 @@
+{
+  "name": "Generate AI Insights (Daily Analysis)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 22 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 22:00 Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 500]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  l.id,\n  l.name,\n  l.institution,\n  l.original_amount,\n  l.current_balance,\n  l.interest_rate,\n  l.interest_fixed_until,\n  l.monthly_payment,\n  p.name as property_name,\n  EXTRACT(DAYS FROM (l.interest_fixed_until - NOW())) as days_until_expiry\nFROM loans l\nLEFT JOIN properties p ON p.id = l.property_id\nWHERE l.status = 'active'\n  AND l.interest_fixed_until IS NOT NULL\n  AND l.interest_fixed_until < NOW() + INTERVAL '6 months'\nORDER BY l.interest_fixed_until ASC",
+        "options": {}
+      },
+      "id": "get-expiring-loans",
+      "name": "Get Expiring Loan Rates",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [520, 100],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  id,\n  name,\n  street,\n  city,\n  purchase_price,\n  purchase_date,\n  current_value,\n  EXTRACT(YEARS FROM AGE(NOW(), purchase_date)) as years_owned,\n  (NOW() + INTERVAL '6 months' > purchase_date + INTERVAL '10 years') as approaching_tax_free\nFROM properties\nWHERE purchase_date IS NOT NULL\n  AND EXTRACT(YEARS FROM AGE(NOW(), purchase_date)) >= 9.5\n  AND EXTRACT(YEARS FROM AGE(NOW(), purchase_date)) < 10.5\nORDER BY purchase_date ASC",
+        "options": {}
+      },
+      "id": "get-tax-free-properties",
+      "name": "Get 10-Year Tax Properties",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [520, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  a.id,\n  a.name,\n  a.account_type,\n  a.current_balance,\n  a.low_balance_threshold,\n  a.institution\nFROM accounts a\nWHERE a.is_active = true\n  AND a.low_balance_threshold IS NOT NULL\n  AND a.current_balance < a.low_balance_threshold\nORDER BY (a.current_balance / NULLIF(a.low_balance_threshold, 0)) ASC",
+        "options": {}
+      },
+      "id": "get-low-balance-accounts",
+      "name": "Get Low Balance Accounts",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [520, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH habit_stats AS (\n  SELECT \n    h.id,\n    h.name,\n    h.category,\n    COUNT(CASE WHEN hl.is_completed THEN 1 END) as completed_count,\n    COUNT(*) as total_count,\n    ROUND(\n      COUNT(CASE WHEN hl.is_completed THEN 1 END)::DECIMAL / \n      NULLIF(COUNT(*), 0) * 100, 1\n    ) as completion_rate\n  FROM habits h\n  LEFT JOIN habit_logs hl ON hl.habit_id = h.id \n    AND hl.date >= CURRENT_DATE - 14\n  WHERE h.is_active = true\n  GROUP BY h.id, h.name, h.category\n)\nSELECT * FROM habit_stats\nWHERE completion_rate < 50 OR completion_rate IS NULL\nORDER BY completion_rate ASC NULLS FIRST",
+        "options": {}
+      },
+      "id": "get-struggling-habits",
+      "name": "Get Struggling Habits",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [520, 400],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH recent_stats AS (\n  SELECT \n    AVG(sleep_score) as avg_sleep_7d,\n    AVG(stress_avg) as avg_stress_7d,\n    AVG(body_battery_start) as avg_body_battery_7d,\n    AVG(resting_hr) as avg_resting_hr_7d\n  FROM garmin_daily_stats\n  WHERE date >= CURRENT_DATE - 7\n),\nprev_stats AS (\n  SELECT \n    AVG(sleep_score) as avg_sleep_prev,\n    AVG(stress_avg) as avg_stress_prev,\n    AVG(body_battery_start) as avg_body_battery_prev,\n    AVG(resting_hr) as avg_resting_hr_prev\n  FROM garmin_daily_stats\n  WHERE date >= CURRENT_DATE - 14 AND date < CURRENT_DATE - 7\n)\nSELECT \n  r.avg_sleep_7d,\n  p.avg_sleep_prev,\n  r.avg_stress_7d,\n  p.avg_stress_prev,\n  r.avg_body_battery_7d,\n  p.avg_body_battery_prev,\n  r.avg_resting_hr_7d,\n  p.avg_resting_hr_prev,\n  CASE \n    WHEN r.avg_sleep_7d < 60 THEN 'poor_sleep'\n    WHEN r.avg_stress_7d > 50 THEN 'high_stress'\n    WHEN r.avg_body_battery_7d < 40 THEN 'low_energy'\n    WHEN r.avg_sleep_7d < p.avg_sleep_prev - 10 THEN 'declining_sleep'\n    WHEN r.avg_stress_7d > p.avg_stress_prev + 10 THEN 'increasing_stress'\n    ELSE NULL\n  END as health_concern\nFROM recent_stats r, prev_stats p\nWHERE r.avg_sleep_7d < 60 \n   OR r.avg_stress_7d > 50 \n   OR r.avg_body_battery_7d < 40\n   OR r.avg_sleep_7d < p.avg_sleep_prev - 10\n   OR r.avg_stress_7d > p.avg_stress_prev + 10",
+        "options": {}
+      },
+      "id": "get-health-trends",
+      "name": "Get Health Trends",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [520, 500],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  pos.id,\n  pos.symbol,\n  pos.name,\n  pos.quantity,\n  pos.avg_buy_price,\n  pos.current_price,\n  pos.current_value,\n  pos.unrealized_gain_loss,\n  pos.unrealized_gain_loss_percent,\n  a.name as account_name\nFROM positions pos\nJOIN accounts a ON a.id = pos.account_id\nWHERE pos.quantity > 0\n  AND ABS(pos.unrealized_gain_loss_percent) > 20\nORDER BY ABS(pos.unrealized_gain_loss_percent) DESC\nLIMIT 10",
+        "options": {}
+      },
+      "id": "get-position-alerts",
+      "name": "Get Position Alerts",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [520, 600],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  i.id,\n  i.invoice_number,\n  i.vendor_name,\n  i.total_amount,\n  i.due_date,\n  i.payment_status,\n  EXTRACT(DAYS FROM (i.due_date - CURRENT_DATE)) as days_until_due\nFROM invoices i\nWHERE i.payment_status IN ('offen', 'teilbezahlt')\n  AND i.due_date IS NOT NULL\n  AND i.due_date <= CURRENT_DATE + 7\nORDER BY i.due_date ASC",
+        "options": {}
+      },
+      "id": "get-due-invoices",
+      "name": "Get Due Invoices",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [520, 700],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  t.id,\n  t.first_name,\n  t.last_name,\n  t.email,\n  t.move_in_date,\n  t.contract_end_date,\n  t.monthly_rent,\n  u.unit_number,\n  p.name as property_name,\n  EXTRACT(DAYS FROM (t.contract_end_date - CURRENT_DATE)) as days_until_end\nFROM tenants t\nJOIN units u ON u.id = t.unit_id\nJOIN properties p ON p.id = u.property_id\nWHERE t.status = 'active'\n  AND t.contract_end_date IS NOT NULL\n  AND t.contract_end_date <= CURRENT_DATE + INTERVAL '3 months'\nORDER BY t.contract_end_date ASC",
+        "options": {}
+      },
+      "id": "get-expiring-tenants",
+      "name": "Get Expiring Tenant Contracts",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [520, 800],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect all findings and create insight objects\nconst loans = $('Get Expiring Loan Rates').all().map(i => i.json);\nconst properties = $('Get 10-Year Tax Properties').all().map(i => i.json);\nconst accounts = $('Get Low Balance Accounts').all().map(i => i.json);\nconst habits = $('Get Struggling Habits').all().map(i => i.json);\nconst health = $('Get Health Trends').all().map(i => i.json);\nconst positions = $('Get Position Alerts').all().map(i => i.json);\nconst invoices = $('Get Due Invoices').all().map(i => i.json);\nconst tenants = $('Get Expiring Tenant Contracts').all().map(i => i.json);\n\nconst findings = [];\n\n// Process expiring loans\nloans.forEach(loan => {\n  const daysLeft = parseInt(loan.days_until_expiry) || 0;\n  findings.push({\n    type: 'loan_rate_expiring',\n    category: 'wealth',\n    priority: daysLeft < 30 ? 'action_required' : daysLeft < 90 ? 'warning' : 'info',\n    context: `Darlehen \"${loan.name}\" bei ${loan.institution}: Zinsbindung endet in ${daysLeft} Tagen (${new Date(loan.interest_fixed_until).toLocaleDateString('de-DE')}). Aktueller Zins: ${loan.interest_rate}%, Restschuld: ${parseFloat(loan.current_balance).toLocaleString('de-DE')}€`,\n    entity_type: 'loan',\n    entity_id: loan.id,\n    data: loan\n  });\n});\n\n// Process tax-free properties\nproperties.forEach(prop => {\n  const yearsOwned = parseFloat(prop.years_owned) || 0;\n  const monthsUntil10Years = Math.round((10 - yearsOwned) * 12);\n  findings.push({\n    type: 'tax_free_approaching',\n    category: 'wealth',\n    priority: monthsUntil10Years <= 3 ? 'action_required' : 'info',\n    context: `Immobilie \"${prop.name}\" (${prop.street}, ${prop.city}): 10-Jahres-Frist für steuerfreien Verkauf in ca. ${monthsUntil10Years} Monaten erreicht. Kaufpreis: ${parseFloat(prop.purchase_price).toLocaleString('de-DE')}€, aktueller Wert: ${parseFloat(prop.current_value || 0).toLocaleString('de-DE')}€`,\n    entity_type: 'property',\n    entity_id: prop.id,\n    data: prop\n  });\n});\n\n// Process low balance accounts\naccounts.forEach(acc => {\n  findings.push({\n    type: 'low_balance',\n    category: 'wealth',\n    priority: acc.current_balance < 0 ? 'action_required' : 'warning',\n    context: `Konto \"${acc.name}\" (${acc.institution}): Kontostand ${parseFloat(acc.current_balance).toLocaleString('de-DE')}€ liegt unter Schwellenwert von ${parseFloat(acc.low_balance_threshold).toLocaleString('de-DE')}€`,\n    entity_type: 'account',\n    entity_id: acc.id,\n    data: acc\n  });\n});\n\n// Process struggling habits\nhabits.forEach(habit => {\n  findings.push({\n    type: 'habit_streak_risk',\n    category: 'health',\n    priority: (habit.completion_rate || 0) < 25 ? 'warning' : 'info',\n    context: `Habit \"${habit.name}\" (${habit.category}): Nur ${habit.completion_rate || 0}% Completion Rate in den letzten 14 Tagen (${habit.completed_count}/${habit.total_count})`,\n    entity_type: 'habit',\n    entity_id: habit.id,\n    data: habit\n  });\n});\n\n// Process health trends\nhealth.forEach(h => {\n  if (!h.health_concern) return;\n  \n  const concernMessages = {\n    'poor_sleep': `Schlechte Schlafqualität: Durchschnittlich ${Math.round(h.avg_sleep_7d || 0)}/100 in den letzten 7 Tagen`,\n    'high_stress': `Erhöhter Stress: Durchschnittlich ${Math.round(h.avg_stress_7d || 0)} in den letzten 7 Tagen`,\n    'low_energy': `Niedrige Energie: Body Battery durchschnittlich ${Math.round(h.avg_body_battery_7d || 0)}% in den letzten 7 Tagen`,\n    'declining_sleep': `Schlafqualität verschlechtert sich: Von ${Math.round(h.avg_sleep_prev || 0)} auf ${Math.round(h.avg_sleep_7d || 0)}`,\n    'increasing_stress': `Stress nimmt zu: Von ${Math.round(h.avg_stress_prev || 0)} auf ${Math.round(h.avg_stress_7d || 0)}`\n  };\n  \n  findings.push({\n    type: 'health_warning',\n    category: 'health',\n    priority: h.health_concern === 'poor_sleep' || h.health_concern === 'high_stress' ? 'warning' : 'info',\n    context: concernMessages[h.health_concern] || 'Gesundheitstrend erkannt',\n    entity_type: 'garmin_stats',\n    entity_id: null,\n    data: h\n  });\n});\n\n// Process position alerts\npositions.forEach(pos => {\n  const gain = parseFloat(pos.unrealized_gain_loss_percent) || 0;\n  const isLoss = gain < 0;\n  \n  findings.push({\n    type: isLoss ? 'position_loss_alert' : 'position_gain_alert',\n    category: 'wealth',\n    priority: Math.abs(gain) > 30 ? 'warning' : 'info',\n    context: `Position ${pos.symbol} (${pos.name}): ${isLoss ? 'Verlust' : 'Gewinn'} von ${Math.abs(gain).toFixed(1)}% (${parseFloat(pos.unrealized_gain_loss).toLocaleString('de-DE')}€). Aktueller Wert: ${parseFloat(pos.current_value).toLocaleString('de-DE')}€`,\n    entity_type: 'position',\n    entity_id: pos.id,\n    data: pos\n  });\n});\n\n// Process due invoices\ninvoices.forEach(inv => {\n  const daysLeft = parseInt(inv.days_until_due) || 0;\n  findings.push({\n    type: 'invoice_due',\n    category: 'wealth',\n    priority: daysLeft <= 0 ? 'action_required' : daysLeft <= 3 ? 'warning' : 'info',\n    context: `Rechnung ${inv.invoice_number} von ${inv.vendor_name}: ${parseFloat(inv.total_amount).toLocaleString('de-DE')}€ ${daysLeft <= 0 ? 'ÜBERFÄLLIG' : `fällig in ${daysLeft} Tagen`} (${new Date(inv.due_date).toLocaleDateString('de-DE')})`,\n    entity_type: 'invoice',\n    entity_id: inv.id,\n    data: inv\n  });\n});\n\n// Process expiring tenant contracts\ntenants.forEach(tenant => {\n  const daysLeft = parseInt(tenant.days_until_end) || 0;\n  findings.push({\n    type: 'tenant_contract_expiring',\n    category: 'wealth',\n    priority: daysLeft < 30 ? 'action_required' : daysLeft < 60 ? 'warning' : 'info',\n    context: `Mietvertrag ${tenant.first_name} ${tenant.last_name} (${tenant.property_name}, ${tenant.unit_number}): Endet in ${daysLeft} Tagen (${new Date(tenant.contract_end_date).toLocaleDateString('de-DE')}). Miete: ${parseFloat(tenant.monthly_rent).toLocaleString('de-DE')}€/Monat`,\n    entity_type: 'tenant',\n    entity_id: tenant.id,\n    data: tenant\n  });\n});\n\n// Return findings as individual items\nif (findings.length === 0) {\n  return [{ json: { no_findings: true } }];\n}\n\nreturn findings.map(f => ({ json: f }));"
+      },
+      "id": "collect-findings",
+      "name": "Collect All Findings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-findings",
+              "leftValue": "={{ $json.no_findings }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-findings",
+      "name": "Has Findings?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 500]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "batch-findings",
+      "name": "Batch Findings",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1340, 400]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o-mini\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Du bist ein persönlicher Finanz- und Lebensberater. Generiere kurze, prägnante Insights auf Deutsch. Jeder Insight sollte:\\n1. Einen klaren Titel haben (max 80 Zeichen)\\n2. Eine kurze Handlungsempfehlung geben\\n3. Konkret und umsetzbar sein\\n\\nAntworte im JSON-Format: {\\\"title\\\": \\\"...\\\", \\\"message\\\": \\\"...\\\", \\\"suggested_actions\\\": [\\\"Aktion 1\\\", \\\"Aktion 2\\\"]}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Erstelle einen Insight für folgendes Finding:\\n\\nTyp: {{ $json.type }}\\nKategorie: {{ $json.category }}\\nPriorität: {{ $json.priority }}\\nKontext: {{ $json.context }}\"\n    }\n  ],\n  \"temperature\": 0.7,\n  \"max_tokens\": 300\n}",
+        "options": {}
+      },
+      "id": "generate-insight",
+      "name": "Generate AI Insight",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 400],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "openai-api",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response and prepare for database insert\nconst finding = $('Batch Findings').first().json;\nconst aiResponse = $input.first().json;\n\nlet title = finding.type;\nlet message = finding.context;\nlet suggestedActions = [];\n\ntry {\n  const content = aiResponse.choices?.[0]?.message?.content || '';\n  // Try to parse JSON from response\n  const jsonMatch = content.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    const parsed = JSON.parse(jsonMatch[0]);\n    title = parsed.title || title;\n    message = parsed.message || message;\n    suggestedActions = parsed.suggested_actions || [];\n  }\n} catch (e) {\n  // Use defaults if parsing fails\n  console.log('Failed to parse AI response:', e.message);\n}\n\nreturn {\n  insight_type: finding.type,\n  category: finding.category,\n  priority: finding.priority,\n  title: title,\n  message: message,\n  data: JSON.stringify(finding.data || {}),\n  suggested_actions: JSON.stringify(suggestedActions.map(a => ({ action: 'custom', label: a }))),\n  related_entity_type: finding.entity_type,\n  related_entity_id: finding.entity_id,\n  original_context: finding.context\n};"
+      },
+      "id": "prepare-insight",
+      "name": "Prepare Insight Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO ai_insights (\n  id,\n  insight_type,\n  category,\n  priority,\n  title,\n  message,\n  data,\n  suggested_actions,\n  related_entity_type,\n  related_entity_id,\n  is_read,\n  is_actioned,\n  created_at,\n  expires_at\n) VALUES (\n  gen_random_uuid(),\n  '{{ $json.insight_type }}',\n  '{{ $json.category }}',\n  '{{ $json.priority }}',\n  '{{ $json.title.replace(/'/g, \"''\") }}',\n  '{{ $json.message.replace(/'/g, \"''\") }}',\n  '{{ $json.data }}'::JSONB,\n  '{{ $json.suggested_actions }}'::JSONB,\n  {{ $json.related_entity_type ? \"'\" + $json.related_entity_type + \"'\" : 'NULL' }},\n  {{ $json.related_entity_id ? \"'\" + $json.related_entity_id + \"'::UUID\" : 'NULL' }},\n  false,\n  false,\n  NOW(),\n  NOW() + INTERVAL '30 days'\n)\nON CONFLICT DO NOTHING\nRETURNING *",
+        "options": {}
+      },
+      "id": "insert-insight",
+      "name": "Insert Insight",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2000, 400],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-done",
+              "leftValue": "={{ $('Batch Findings').first().context.noItemsLeft }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-all-done",
+      "name": "All Done?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2220, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  id,\n  insight_type,\n  category,\n  priority,\n  title,\n  message,\n  suggested_actions\nFROM ai_insights\nWHERE priority IN ('action_required', 'warning')\n  AND is_read = false\n  AND created_at >= NOW() - INTERVAL '1 hour'\nORDER BY \n  CASE priority WHEN 'action_required' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,\n  created_at DESC\nLIMIT 10",
+        "options": {}
+      },
+      "id": "get-high-priority",
+      "name": "Get High Priority Insights",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2440, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format insights for Telegram\nconst insights = $input.all().map(i => i.json);\n\nif (insights.length === 0) {\n  return { json: { has_alerts: false } };\n}\n\nconst priorityEmoji = {\n  'action_required': ':rotating_light:',\n  'warning': ':warning:',\n  'info': ':information_source:'\n};\n\nconst categoryEmoji = {\n  'wealth': ':moneybag:',\n  'health': ':heart:',\n  'productivity': ':dart:',\n  'goals': ':trophy:'\n};\n\nconst insightTexts = insights.map((insight, i) => {\n  const pEmoji = priorityEmoji[insight.priority] || ':information_source:';\n  const cEmoji = categoryEmoji[insight.category] || ':bulb:';\n  return `${pEmoji} **${insight.title}**\\n${cEmoji} ${insight.message}`;\n});\n\nconst message = `:brain: **Tägliche AI Insights**\\n\\n${insightTexts.join('\\n\\n---\\n\\n')}\\n\\n_${insights.length} neue Insights generiert_`;\n\nreturn {\n  json: {\n    has_alerts: true,\n    message: message,\n    count: insights.length\n  }\n};"
+      },
+      "id": "format-telegram",
+      "name": "Format Telegram Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2660, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-alerts",
+              "leftValue": "={{ $json.has_alerts }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-alerts",
+      "name": "Has Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2880, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send Telegram Alerts",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [3100, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Life OS Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT cleanup_old_insights(30) as deleted_count",
+        "options": {}
+      },
+      "id": "cleanup-old-insights",
+      "name": "Cleanup Old Insights",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3100, 400],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_status (id, source, entity_type, last_sync_at, status, records_synced)\nVALUES (gen_random_uuid(), 'ai_insights', 'daily_generation', NOW(), 'success', {{ $('Collect All Findings').all().length }})\nON CONFLICT (source, entity_type) DO UPDATE SET\n  last_sync_at = NOW(),\n  status = 'success',\n  records_synced = {{ $('Collect All Findings').all().length }},\n  error_message = NULL",
+        "options": {}
+      },
+      "id": "update-sync-status",
+      "name": "Update Sync Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3320, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "no-op-end",
+      "name": "End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [3540, 400]
+    },
+    {
+      "parameters": {},
+      "id": "no-findings-end",
+      "name": "No Findings End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1340, 600]
+    }
+  ],
+  "connections": {
+    "Daily 22:00 Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Expiring Loan Rates",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get 10-Year Tax Properties",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Low Balance Accounts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Struggling Habits",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Health Trends",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Position Alerts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Due Invoices",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Expiring Tenant Contracts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Expiring Loan Rates": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get 10-Year Tax Properties": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Low Balance Accounts": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Struggling Habits": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Health Trends": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Position Alerts": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Due Invoices": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Expiring Tenant Contracts": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect All Findings": {
+      "main": [
+        [
+          {
+            "node": "Has Findings?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Findings?": {
+      "main": [
+        [
+          {
+            "node": "Batch Findings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Findings End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Findings": {
+      "main": [
+        [
+          {
+            "node": "Generate AI Insight",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate AI Insight": {
+      "main": [
+        [
+          {
+            "node": "Prepare Insight Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Insight Data": {
+      "main": [
+        [
+          {
+            "node": "Insert Insight",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Insight": {
+      "main": [
+        [
+          {
+            "node": "All Done?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "All Done?": {
+      "main": [
+        [
+          {
+            "node": "Get High Priority Insights",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Batch Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get High Priority Insights": {
+      "main": [
+        [
+          {
+            "node": "Format Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "Has Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Alerts?": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cleanup Old Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Alerts": {
+      "main": [
+        [
+          {
+            "node": "Cleanup Old Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleanup Old Insights": {
+      "main": [
+        [
+          {
+            "node": "Update Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sync Status": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "life-os"
+  },
+  "tags": [
+    {
+      "name": "ai-copilot",
+      "id": "ai-copilot-tag"
+    },
+    {
+      "name": "insights",
+      "id": "insights-tag"
+    },
+    {
+      "name": "daily",
+      "id": "daily-tag"
+    }
+  ],
+  "pinData": {},
+  "staticData": null,
+  "triggerCount": 0
+}

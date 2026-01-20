@@ -1,0 +1,213 @@
+{
+  "name": "12 - Process Scan Inbox",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "scan-inbox",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "scan-inbox"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse scanned document data\nconst webhook = $input.first().json;\n\nconst document = {\n  external_id: `scan_${webhook.scan_id || webhook.id || Date.now()}`,\n  file_name: webhook.file_name || webhook.fileName || 'Unnamed Scan',\n  file_url: webhook.file_url || webhook.fileUrl || webhook.download_url,\n  file_size: webhook.file_size || webhook.fileSize || 0,\n  mime_type: webhook.mime_type || webhook.mimeType || 'application/pdf',\n  ocr_text: webhook.ocr_text || webhook.ocrText || webhook.text || '',\n  detected_type: detectDocumentType(webhook),\n  confidence: webhook.confidence || 0.5,\n  metadata: webhook.metadata || {}\n};\n\nfunction detectDocumentType(data) {\n  const text = (data.ocr_text || data.ocrText || data.text || '').toLowerCase();\n  const fileName = (data.file_name || data.fileName || '').toLowerCase();\n  \n  // Invoice detection\n  if (text.includes('rechnung') || text.includes('invoice') || \n      text.includes('rechnungsnummer') || fileName.includes('rechnung')) {\n    return 'invoice';\n  }\n  \n  // Contract detection\n  if (text.includes('vertrag') || text.includes('contract') ||\n      text.includes('vereinbarung') || fileName.includes('vertrag')) {\n    return 'contract';\n  }\n  \n  // Bank statement\n  if (text.includes('kontoauszug') || text.includes('bank statement') ||\n      text.includes('saldo') || fileName.includes('kontoauszug')) {\n    return 'bank_statement';\n  }\n  \n  // Tax document\n  if (text.includes('steuer') || text.includes('finanzamt') ||\n      text.includes('bescheid') || fileName.includes('steuer')) {\n    return 'tax_document';\n  }\n  \n  // Insurance\n  if (text.includes('versicherung') || text.includes('police') ||\n      text.includes('versicherungsschein')) {\n    return 'insurance';\n  }\n  \n  return data.detected_type || 'document';\n}\n\nreturn [{ json: document }];"
+      },
+      "id": "parse-scan",
+      "name": "Parse Scan Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "documents",
+        "columns": "external_id, file_name, file_url, file_size, mime_type, ocr_text, document_type, confidence, metadata",
+        "conflictColumns": "external_id",
+        "options": {}
+      },
+      "id": "save-document",
+      "name": "Save Document",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create inbox item for the scanned document\nconst doc = $('Parse Scan Data').first().json;\n\nconst typeLabels = {\n  'invoice': 'Rechnung',\n  'contract': 'Vertrag',\n  'bank_statement': 'Kontoauszug',\n  'tax_document': 'Steuerdokument',\n  'insurance': 'Versicherung',\n  'document': 'Dokument'\n};\n\nconst typeIcons = {\n  'invoice': '🧾',\n  'contract': '📄',\n  'bank_statement': '🏦',\n  'tax_document': '📋',\n  'insurance': '🛡️',\n  'document': '📁'\n};\n\nconst label = typeLabels[doc.detected_type] || 'Dokument';\nconst icon = typeIcons[doc.detected_type] || '📁';\n\n// Determine priority based on document type\nlet priority = 'medium';\nif (['invoice', 'tax_document'].includes(doc.detected_type)) {\n  priority = 'high';\n}\nif (doc.confidence < 0.5) {\n  priority = 'high'; // Needs manual review\n}\n\n// Extract key info from OCR if available\nlet extractedInfo = '';\nif (doc.ocr_text) {\n  // Try to extract amounts\n  const amountMatch = doc.ocr_text.match(/(?:€|EUR|Euro)?\\s*(\\d{1,3}(?:[.,]\\d{3})*(?:[.,]\\d{2}))\\s*(?:€|EUR|Euro)?/gi);\n  if (amountMatch) {\n    extractedInfo += `\\n\\n**Gefundene Beträge:** ${amountMatch.slice(0, 3).join(', ')}`;\n  }\n  \n  // Try to extract dates\n  const dateMatch = doc.ocr_text.match(/\\d{1,2}[./]\\d{1,2}[./]\\d{2,4}/g);\n  if (dateMatch) {\n    extractedInfo += `\\n**Gefundene Daten:** ${dateMatch.slice(0, 3).join(', ')}`;\n  }\n}\n\nreturn [{\n  json: {\n    source: 'scan',\n    source_id: doc.external_id,\n    item_type: 'document',\n    title: `${icon} Neuer Scan: ${label}`,\n    content: `**Datei:** ${doc.file_name}\\n**Typ:** ${label} (${Math.round(doc.confidence * 100)}% Sicherheit)${extractedInfo}\\n\\n${doc.confidence < 0.7 ? '⚠️ *Bitte manuell prüfen*' : ''}`,\n    priority: priority,\n    status: 'pending',\n    metadata: {\n      document_id: doc.external_id,\n      document_type: doc.detected_type,\n      file_url: doc.file_url\n    }\n  }\n}];"
+      },
+      "id": "create-inbox-item",
+      "name": "Create Inbox Item",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "inbox_items",
+        "columns": "source, source_id, item_type, title, content, priority, status, metadata",
+        "conflictColumns": "source_id",
+        "options": {}
+      },
+      "id": "insert-inbox",
+      "name": "Insert Inbox Item",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1120, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Telegram notification\nconst doc = $('Parse Scan Data').first().json;\nconst inbox = $('Create Inbox Item').first().json;\n\nconst typeLabels = {\n  'invoice': 'Rechnung',\n  'contract': 'Vertrag',\n  'bank_statement': 'Kontoauszug',\n  'tax_document': 'Steuerdokument',\n  'insurance': 'Versicherung',\n  'document': 'Dokument'\n};\n\nconst label = typeLabels[doc.detected_type] || 'Dokument';\n\nlet message = `📥 *Neuer Scan*\\n\\n`;\nmessage += `📄 *${doc.file_name}*\\n`;\nmessage += `🏷 Typ: ${label}\\n`;\nmessage += `📊 Erkennung: ${Math.round(doc.confidence * 100)}%\\n`;\n\nif (doc.confidence < 0.7) {\n  message += `\\n⚠️ *Geringe Erkennungssicherheit - bitte prüfen*`;\n}\n\nmessage += `\\n\\n→ Im Inbox zur Verarbeitung`;\n\nreturn [{\n  json: {\n    message: message,\n    parse_mode: 'Markdown'\n  }\n}];"
+      },
+      "id": "prepare-notification",
+      "name": "Prepare Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1560, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-creds",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, document_id: $('Parse Scan Data').first().json.external_id }) }}"
+      },
+      "id": "respond",
+      "name": "Respond Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1780, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Scan Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Scan Data": {
+      "main": [
+        [
+          {
+            "node": "Save Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Document": {
+      "main": [
+        [
+          {
+            "node": "Create Inbox Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Inbox Item": {
+      "main": [
+        [
+          {
+            "node": "Insert Inbox Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Inbox Item": {
+      "main": [
+        [
+          {
+            "node": "Prepare Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Notification": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram": {
+      "main": [
+        [
+          {
+            "node": "Respond Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "productivity"
+    },
+    {
+      "name": "webhook"
+    }
+  ],
+  "active": false
+}

@@ -1,0 +1,391 @@
+{
+  "name": "17 - Generate Morning Briefing",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 6,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 06:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "inbox_items",
+        "columns": "id, title, priority, status, due_date",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "keyValue": "pending"
+            }
+          ]
+        },
+        "options": {
+          "orderByField": "priority",
+          "limit": 10
+        }
+      },
+      "id": "get-inbox",
+      "name": "Get Inbox Items",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 100],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "daily_readiness",
+        "columns": "readiness_score, recommendation, factors",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "date",
+              "keyValue": "={{ new Date().toISOString().split('T')[0] }}"
+            }
+          ]
+        }
+      },
+      "id": "get-readiness",
+      "name": "Get Readiness",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 260],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "habits",
+        "columns": "id, name, streak, target_per_day",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "is_active",
+              "keyValue": "true"
+            }
+          ]
+        }
+      },
+      "id": "get-habits",
+      "name": "Get Habits",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 420],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "workouts",
+        "columns": "name, workout_type, duration_minutes",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "day_of_week",
+              "keyValue": "={{ new Date().getDay() }}"
+            }
+          ]
+        }
+      },
+      "id": "get-workout",
+      "name": "Get Today's Workout",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 580],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "daily_snapshots",
+        "columns": "net_worth, total_assets, total_liabilities",
+        "options": {
+          "orderByField": "snapshot_date",
+          "orderByDirection": "DESC",
+          "limit": 1
+        }
+      },
+      "id": "get-networth",
+      "name": "Get Net Worth",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 740],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compile all data for briefing\nconst inbox = $('Get Inbox Items').all().map(i => i.json);\nconst readiness = $('Get Readiness').all()[0]?.json || null;\nconst habits = $('Get Habits').all().map(i => i.json);\nconst workout = $('Get Today\\'s Workout').all()[0]?.json || null;\nconst networth = $('Get Net Worth').all()[0]?.json || null;\n\nconst today = new Date();\nconst dayNames = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];\nconst monthNames = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];\n\nreturn [{\n  json: {\n    date: today.toISOString().split('T')[0],\n    day_name: dayNames[today.getDay()],\n    date_formatted: `${today.getDate()}. ${monthNames[today.getMonth()]}`,\n    inbox: inbox,\n    inbox_count: inbox.length,\n    high_priority_count: inbox.filter(i => i.priority === 'high').length,\n    readiness: readiness,\n    habits: habits,\n    workout: workout,\n    networth: networth\n  }\n}];"
+      },
+      "id": "compile-data",
+      "name": "Compile Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 400]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Du bist ein persönlicher Assistent, der jeden Morgen ein kurzes, motivierendes Briefing erstellt. Halte dich kurz und knackig. Nutze Emojis sparsam aber effektiv. Schreibe auf Deutsch."
+            },
+            {
+              "role": "user",
+              "content": "=Erstelle ein Morgen-Briefing basierend auf diesen Daten:\n\n**Datum:** {{ $json.day_name }}, {{ $json.date_formatted }}\n\n**Inbox:** {{ $json.inbox_count }} offene Items ({{ $json.high_priority_count }} hohe Priorität)\nTop Items: {{ $json.inbox.slice(0,3).map(i => i.title).join(', ') }}\n\n**Readiness:** {{ $json.readiness ? $json.readiness.readiness_score + '%' : 'Keine Daten' }}\n{{ $json.readiness?.recommendation || '' }}\n\n**Training heute:** {{ $json.workout ? $json.workout.name + ' (' + $json.workout.duration_minutes + ' min)' : 'Ruhetag' }}\n\n**Habits:** {{ $json.habits.length }} aktive Habits\n\n**Net Worth:** {{ $json.networth ? '€' + $json.networth.net_worth.toLocaleString('de-DE') : 'Keine Daten' }}\n\nErstelle ein kurzes Briefing (max 500 Zeichen) mit den wichtigsten Punkten für den Tag."
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 300,
+          "temperature": 0.7
+        }
+      },
+      "id": "generate-briefing",
+      "name": "Generate AI Briefing",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.3,
+      "position": [960, 400],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-creds",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format the final briefing message\nconst data = $('Compile Data').first().json;\nconst aiResponse = $input.first().json;\n\nconst briefingText = aiResponse.message?.content || aiResponse.choices?.[0]?.message?.content || 'Briefing konnte nicht generiert werden.';\n\nlet message = `☀️ *Guten Morgen!*\\n`;\nmessage += `📅 ${data.day_name}, ${data.date_formatted}\\n`;\nmessage += `━━━━━━━━━━━━━━━━━━\\n\\n`;\nmessage += briefingText;\nmessage += `\\n\\n━━━━━━━━━━━━━━━━━━\\n`;\nmessage += `Tippe /today für Details`;\n\nreturn [{\n  json: {\n    message: message,\n    parse_mode: 'Markdown',\n    briefing_text: briefingText,\n    date: data.date\n  }\n}];"
+      },
+      "id": "format-message",
+      "name": "Format Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1180, 400]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send Briefing",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1400, 400],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-creds",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "ai_insights",
+        "columns": "date, insight_type, content, generated_at",
+        "options": {}
+      },
+      "id": "log-briefing",
+      "name": "Log Briefing",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1400, 580],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 06:30": {
+      "main": [
+        [
+          {
+            "node": "Get Inbox Items",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Readiness",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Habits",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Today's Workout",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Net Worth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Inbox Items": {
+      "main": [
+        [
+          {
+            "node": "Compile Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Readiness": {
+      "main": [
+        [
+          {
+            "node": "Compile Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Habits": {
+      "main": [
+        [
+          {
+            "node": "Compile Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Today's Workout": {
+      "main": [
+        [
+          {
+            "node": "Compile Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Net Worth": {
+      "main": [
+        [
+          {
+            "node": "Compile Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Data": {
+      "main": [
+        [
+          {
+            "node": "Generate AI Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate AI Briefing": {
+      "main": [
+        [
+          {
+            "node": "Format Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Message": {
+      "main": [
+        [
+          {
+            "node": "Send Briefing",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "ai-copilot"
+    },
+    {
+      "name": "daily"
+    }
+  ],
+  "active": false
+}

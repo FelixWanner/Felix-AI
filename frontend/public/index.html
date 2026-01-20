@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Life OS - Coming Soon</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #e4e4e4;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+        }
+        .logo {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .subtitle {
+            font-size: 1.2rem;
+            color: #a0a0a0;
+            margin-bottom: 2rem;
+        }
+        .status {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin: 2rem auto;
+            max-width: 400px;
+        }
+        .status h3 {
+            color: #00d4ff;
+            margin-bottom: 1rem;
+        }
+        .service {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .service:last-child {
+            border-bottom: none;
+        }
+        .service a {
+            color: #00d4ff;
+            text-decoration: none;
+        }
+        .service a:hover {
+            text-decoration: underline;
+        }
+        .badge {
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+        .badge.ready {
+            background: #10b981;
+            color: #fff;
+        }
+        .badge.dev {
+            background: #f59e0b;
+            color: #000;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🧠</div>
+        <h1>Life OS</h1>
+        <p class="subtitle">Personal Operating System</p>
+
+        <div class="status">
+            <h3>Services</h3>
+            <div class="service">
+                <span>Dashboard</span>
+                <span class="badge dev">In Development</span>
+            </div>
+            <div class="service">
+                <a href="/n8n/" target="_blank">n8n Workflows</a>
+                <span class="badge ready">Ready</span>
+            </div>
+            <div class="service">
+                <a href="/studio/" target="_blank">Supabase Studio</a>
+                <span class="badge ready">Ready</span>
+            </div>
+            <div class="service">
+                <a href="/rest/v1/" target="_blank">REST API</a>
+                <span class="badge ready">Ready</span>
+            </div>
+        </div>
+
+        <p style="color: #666; font-size: 0.9rem;">
+            Frontend wird mit React + Tailwind CSS entwickelt
+        </p>
+    </div>
+</body>
+</html>

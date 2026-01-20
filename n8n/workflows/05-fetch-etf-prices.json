@@ -1,0 +1,263 @@
+{
+  "name": "05 - Fetch ETF Prices",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 20
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 20:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "investment_positions",
+        "columns": "isin, symbol, name, current_price",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "quantity",
+              "condition": "gt",
+              "keyValue": "0"
+            }
+          ]
+        },
+        "options": {
+          "returnAll": true
+        }
+      },
+      "id": "get-positions",
+      "name": "Get Active Positions",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "batch-symbols",
+      "name": "Batch Symbols",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://query1.finance.yahoo.com/v8/finance/chart/{{ $json.symbol || $json.isin + '.DE' }}",
+        "options": {
+          "timeout": 10000
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "interval",
+              "value": "1d"
+            },
+            {
+              "name": "range",
+              "value": "5d"
+            }
+          ]
+        }
+      },
+      "id": "yahoo-api",
+      "name": "Fetch Yahoo Price",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract price from Yahoo Finance response\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  try {\n    const chart = item.json.chart;\n    if (!chart || !chart.result || chart.result.length === 0) {\n      continue;\n    }\n    \n    const result = chart.result[0];\n    const meta = result.meta;\n    const quotes = result.indicators?.quote?.[0];\n    \n    // Get the latest closing price\n    let currentPrice = meta.regularMarketPrice;\n    let previousClose = meta.previousClose || meta.chartPreviousClose;\n    \n    // If no regularMarketPrice, use the last close from quotes\n    if (!currentPrice && quotes && quotes.close) {\n      const closes = quotes.close.filter(c => c !== null);\n      currentPrice = closes[closes.length - 1];\n    }\n    \n    if (currentPrice) {\n      results.push({\n        json: {\n          symbol: meta.symbol,\n          isin: item.json.isin,\n          current_price: currentPrice,\n          previous_close: previousClose,\n          currency: meta.currency || 'EUR',\n          change: currentPrice - previousClose,\n          change_percent: previousClose ? ((currentPrice - previousClose) / previousClose * 100) : 0,\n          market_state: meta.marketState,\n          last_price_update: new Date().toISOString()\n        }\n      });\n    }\n  } catch (error) {\n    console.log('Error processing item:', error.message);\n  }\n}\n\nreturn results;"
+      },
+      "id": "extract-price",
+      "name": "Extract Price",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "investment_positions",
+        "columns": "current_price, last_price_update",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "isin",
+              "keyValue": "={{ $json.isin }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "update-price",
+      "name": "Update Price",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1340, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Record price history\nconst items = $input.all();\n\nreturn items.map(item => ({\n  json: {\n    isin: item.json.isin,\n    symbol: item.json.symbol,\n    price: item.json.current_price,\n    currency: item.json.currency,\n    recorded_at: new Date().toISOString(),\n    source: 'yahoo_finance'\n  }\n}));"
+      },
+      "id": "prepare-history",
+      "name": "Prepare History",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "price_history",
+        "columns": "isin, symbol, price, currency, recorded_at, source",
+        "options": {}
+      },
+      "id": "insert-history",
+      "name": "Insert Price History",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1780, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "wait",
+      "name": "Rate Limit",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1120, 480],
+      "webhookId": "rate-limit"
+    }
+  ],
+  "connections": {
+    "Daily 20:00": {
+      "main": [
+        [
+          {
+            "node": "Get Active Positions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Positions": {
+      "main": [
+        [
+          {
+            "node": "Batch Symbols",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Symbols": {
+      "main": [
+        [
+          {
+            "node": "Fetch Yahoo Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Yahoo Price": {
+      "main": [
+        [
+          {
+            "node": "Extract Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Price": {
+      "main": [
+        [
+          {
+            "node": "Update Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Price": {
+      "main": [
+        [
+          {
+            "node": "Prepare History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare History": {
+      "main": [
+        [
+          {
+            "node": "Insert Price History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "wealth"
+    },
+    {
+      "name": "investments"
+    }
+  ],
+  "active": false
+}

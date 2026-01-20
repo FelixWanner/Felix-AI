@@ -1,0 +1,258 @@
+{
+  "name": "08 - Check Loan Milestones",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 1 * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "1st of Month 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "loans",
+        "columns": "id, name, property_id, original_amount, current_balance, interest_rate, start_date, end_date, fixed_rate_until, special_repayment_allowed, special_repayment_max, notes",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "current_balance",
+              "condition": "gt",
+              "keyValue": "0"
+            }
+          ]
+        },
+        "options": {
+          "returnAll": true
+        }
+      },
+      "id": "get-loans",
+      "name": "Get Active Loans",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check for important loan milestones\nconst loans = $input.all();\nconst today = new Date();\nconst alerts = [];\n\nfor (const loanItem of loans) {\n  const loan = loanItem.json;\n  const loanAlerts = [];\n  \n  // 1. Check Zinsbindung (fixed rate expiry)\n  if (loan.fixed_rate_until) {\n    const fixedUntil = new Date(loan.fixed_rate_until);\n    const monthsUntilExpiry = (fixedUntil - today) / (1000 * 60 * 60 * 24 * 30);\n    \n    if (monthsUntilExpiry <= 12 && monthsUntilExpiry > 0) {\n      loanAlerts.push({\n        type: 'fixed_rate_expiry',\n        priority: monthsUntilExpiry <= 6 ? 'high' : 'medium',\n        message: `Zinsbindung endet in ${Math.round(monthsUntilExpiry)} Monaten (${fixedUntil.toLocaleDateString('de-DE')})`,\n        action: 'Anschlussfinanzierung verhandeln'\n      });\n    }\n  }\n  \n  // 2. Check 10-Jahres-Sonderkündigungsrecht (§489 BGB)\n  if (loan.start_date) {\n    const startDate = new Date(loan.start_date);\n    const tenYearsAfterStart = new Date(startDate);\n    tenYearsAfterStart.setFullYear(tenYearsAfterStart.getFullYear() + 10);\n    \n    const monthsUntil10Years = (tenYearsAfterStart - today) / (1000 * 60 * 60 * 24 * 30);\n    \n    if (monthsUntil10Years <= 12 && monthsUntil10Years > -1) {\n      loanAlerts.push({\n        type: '10_year_special_termination',\n        priority: 'high',\n        message: `10-Jahres-Sonderkündigungsrecht ab ${tenYearsAfterStart.toLocaleDateString('de-DE')}`,\n        action: 'Umschuldung prüfen (6 Monate Kündigungsfrist)'\n      });\n    }\n  }\n  \n  // 3. Check Sondertilgung deadline (usually end of year)\n  if (loan.special_repayment_allowed && loan.special_repayment_max > 0) {\n    const currentMonth = today.getMonth();\n    \n    if (currentMonth >= 9) { // October or later\n      loanAlerts.push({\n        type: 'special_repayment_reminder',\n        priority: 'medium',\n        message: `Sondertilgung möglich: bis zu €${loan.special_repayment_max.toLocaleString('de-DE')}`,\n        action: 'Sondertilgung bis 31.12. prüfen'\n      });\n    }\n  }\n  \n  // 4. Check loan end date\n  if (loan.end_date) {\n    const endDate = new Date(loan.end_date);\n    const monthsUntilEnd = (endDate - today) / (1000 * 60 * 60 * 24 * 30);\n    \n    if (monthsUntilEnd <= 24 && monthsUntilEnd > 0) {\n      loanAlerts.push({\n        type: 'loan_ending',\n        priority: monthsUntilEnd <= 12 ? 'high' : 'medium',\n        message: `Darlehen endet in ${Math.round(monthsUntilEnd)} Monaten`,\n        action: 'Restschuld und Folgefinanzierung planen'\n      });\n    }\n  }\n  \n  if (loanAlerts.length > 0) {\n    alerts.push({\n      loan_id: loan.id,\n      loan_name: loan.name,\n      property_id: loan.property_id,\n      current_balance: loan.current_balance,\n      interest_rate: loan.interest_rate,\n      alerts: loanAlerts\n    });\n  }\n}\n\nreturn [{\n  json: {\n    check_date: today.toISOString(),\n    total_loans: loans.length,\n    loans_with_alerts: alerts.length,\n    alerts: alerts,\n    has_critical: alerts.some(a => a.alerts.some(al => al.priority === 'high'))\n  }\n}];"
+      },
+      "id": "check-milestones",
+      "name": "Check Milestones",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.loans_with_alerts }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "has-alerts",
+      "name": "Has Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Telegram message for loan alerts\nconst data = $input.first().json;\n\nlet message = `🏦 *Darlehens-Meilensteine*\\n\\n`;\nmessage += `📅 ${new Date().toLocaleDateString('de-DE')}\\n`;\nmessage += `━━━━━━━━━━━━━━━━━━\\n\\n`;\n\nfor (const loan of data.alerts) {\n  message += `📋 *${loan.loan_name}*\\n`;\n  message += `   Restschuld: €${loan.current_balance.toLocaleString('de-DE')}\\n`;\n  message += `   Zins: ${loan.interest_rate}%\\n\\n`;\n  \n  for (const alert of loan.alerts) {\n    const icon = alert.priority === 'high' ? '🔴' : '🟡';\n    message += `   ${icon} ${alert.message}\\n`;\n    message += `   → ${alert.action}\\n\\n`;\n  }\n  \n  message += `\\n`;\n}\n\nmessage += `━━━━━━━━━━━━━━━━━━\\n`;\nmessage += `📊 ${data.loans_with_alerts} von ${data.total_loans} Darlehen mit Hinweisen`;\n\nreturn [{\n  json: {\n    message: message,\n    parse_mode: 'Markdown',\n    has_critical: data.has_critical\n  }\n}];"
+      },
+      "id": "prepare-message",
+      "name": "Prepare Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1340, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-creds",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create inbox items for high priority alerts\nconst data = $('Check Milestones').first().json;\nconst inboxItems = [];\n\nfor (const loan of data.alerts) {\n  for (const alert of loan.alerts) {\n    if (alert.priority === 'high') {\n      inboxItems.push({\n        json: {\n          source: 'n8n',\n          source_id: `loan_alert_${loan.loan_id}_${alert.type}`,\n          item_type: 'reminder',\n          title: `${loan.loan_name}: ${alert.type.replace(/_/g, ' ')}`,\n          content: `${alert.message}\\n\\nAktion: ${alert.action}`,\n          priority: 'high',\n          status: 'pending',\n          due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() // 30 days\n        }\n      });\n    }\n  }\n}\n\nreturn inboxItems.length > 0 ? inboxItems : [{ json: { skip: true } }];"
+      },
+      "id": "create-inbox-items",
+      "name": "Create Inbox Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.skip }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "should-insert",
+      "name": "Should Insert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1340, 400]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "inbox_items",
+        "columns": "source, source_id, item_type, title, content, priority, status, due_date",
+        "conflictColumns": "source_id",
+        "options": {}
+      },
+      "id": "insert-inbox",
+      "name": "Insert Inbox Items",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1560, 320],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "1st of Month 08:00": {
+      "main": [
+        [
+          {
+            "node": "Get Active Loans",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Loans": {
+      "main": [
+        [
+          {
+            "node": "Check Milestones",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Milestones": {
+      "main": [
+        [
+          {
+            "node": "Has Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Alerts?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create Inbox Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Prepare Message": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Inbox Items": {
+      "main": [
+        [
+          {
+            "node": "Should Insert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Insert?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Insert Inbox Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "wealth"
+    },
+    {
+      "name": "loans"
+    }
+  ],
+  "active": false
+}
