@@ -132,6 +132,7 @@ services:
       POSTGRES_DB: postgres
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXP: 3600
+      N8N_DB_PASSWORD: ${N8N_DB_PASSWORD}
     volumes:
       - supabase_db_data:/var/lib/postgresql/data
       - ./supabase/migrations:/docker-entrypoint-initdb.d:ro
