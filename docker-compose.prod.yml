@@ -1,0 +1,386 @@
+# ═══════════════════════════════════════════════════════════════
+# Life OS - Production Overrides
+# ═══════════════════════════════════════════════════════════════
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# This file contains production-specific configurations:
+# - Resource limits (CPU, memory)
+# - Production logging
+# - Health checks with shorter intervals
+# - Restart policies
+# - Security hardening
+#
+# ═══════════════════════════════════════════════════════════════
+
+services:
+  # ───────────────────────────────────────────────────────────────
+  # Caddy - Reverse Proxy
+  # ───────────────────────────────────────────────────────────────
+  caddy:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+        labels: "service"
+    labels:
+      - "service=caddy"
+      - "environment=production"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ───────────────────────────────────────────────────────────────
+  # Frontend - React Dashboard
+  # ───────────────────────────────────────────────────────────────
+  frontend:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    labels:
+      - "service=frontend"
+      - "environment=production"
+    environment:
+      - NODE_ENV=production
+
+  # ───────────────────────────────────────────────────────────────
+  # n8n - Workflow Automation
+  # ───────────────────────────────────────────────────────────────
+  n8n:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "10"
+    labels:
+      - "service=n8n"
+      - "environment=production"
+    environment:
+      - N8N_LOG_LEVEL=warn
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_PERSONALIZATION_ENABLED=false
+      - N8N_VERSION_NOTIFICATIONS_ENABLED=false
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=168
+      - EXECUTIONS_DATA_PRUNE_MAX_COUNT=50000
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ───────────────────────────────────────────────────────────────
+  # PostgreSQL Database
+  # ───────────────────────────────────────────────────────────────
+  supabase-db:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
+    labels:
+      - "service=database"
+      - "environment=production"
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_connections=200
+      - -c
+      - shared_preload_libraries=pg_stat_statements,pgaudit,pgjwt,pg_cron
+      # Production optimizations
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - effective_cache_size=3GB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - wal_buffers=16MB
+      - -c
+      - default_statistics_target=100
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=200
+      - -c
+      - work_mem=16MB
+      - -c
+      - min_wal_size=1GB
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - max_worker_processes=4
+      - -c
+      - max_parallel_workers_per_gather=2
+      - -c
+      - max_parallel_workers=4
+      - -c
+      - max_parallel_maintenance_workers=2
+      # Logging
+      - -c
+      - log_min_duration_statement=1000
+      - -c
+      - log_checkpoints=on
+      - -c
+      - log_connections=off
+      - -c
+      - log_disconnections=off
+      - -c
+      - log_lock_waits=on
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ───────────────────────────────────────────────────────────────
+  # Supabase Studio
+  # ───────────────────────────────────────────────────────────────
+  supabase-studio:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - "service=studio"
+      - "environment=production"
+
+  # ───────────────────────────────────────────────────────────────
+  # Kong API Gateway
+  # ───────────────────────────────────────────────────────────────
+  supabase-kong:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+    labels:
+      - "service=kong"
+      - "environment=production"
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ───────────────────────────────────────────────────────────────
+  # Auth Service (GoTrue)
+  # ───────────────────────────────────────────────────────────────
+  supabase-auth:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    labels:
+      - "service=auth"
+      - "environment=production"
+    environment:
+      - GOTRUE_LOG_LEVEL=warn
+
+  # ───────────────────────────────────────────────────────────────
+  # REST API (PostgREST)
+  # ───────────────────────────────────────────────────────────────
+  supabase-rest:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    labels:
+      - "service=rest"
+      - "environment=production"
+
+  # ───────────────────────────────────────────────────────────────
+  # Realtime Service
+  # ───────────────────────────────────────────────────────────────
+  supabase-realtime:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    labels:
+      - "service=realtime"
+      - "environment=production"
+
+  # ───────────────────────────────────────────────────────────────
+  # Meta Service
+  # ───────────────────────────────────────────────────────────────
+  supabase-meta:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+    labels:
+      - "service=meta"
+      - "environment=production"
+
+  # ───────────────────────────────────────────────────────────────
+  # Storage API
+  # ───────────────────────────────────────────────────────────────
+  supabase-storage:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    labels:
+      - "service=storage"
+      - "environment=production"
+    environment:
+      - FILE_SIZE_LIMIT=104857600
+      - LOG_LEVEL=warn
+
+  # ───────────────────────────────────────────────────────────────
+  # Image Proxy
+  # ───────────────────────────────────────────────────────────────
+  supabase-imgproxy:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+    labels:
+      - "service=imgproxy"
+      - "environment=production"
+    environment:
+      - IMGPROXY_CONCURRENCY=10
+      - IMGPROXY_MAX_SRC_FILE_SIZE=50000000
+      - IMGPROXY_TTL=31536000
+      - IMGPROXY_CACHE_CONTROL_PASSTHROUGH=true
+
+# ═══════════════════════════════════════════════════════════════
+# Production Resource Summary
+# ═══════════════════════════════════════════════════════════════
+#
+# Total Resource Limits:
+# - CPU: ~10 cores (with reservation ~2.5 cores)
+# - Memory: ~12 GB (with reservation ~3 GB)
+#
+# Recommended Server: CX31 (8 GB RAM) minimum, CX41 (16 GB) preferred
+#
+# ═══════════════════════════════════════════════════════════════
