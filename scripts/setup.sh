@@ -156,6 +156,127 @@ if [ "$REGENERATE" = true ]; then
     N8N_DB_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
     sed -i "s|N8N_DB_PASSWORD=.*|N8N_DB_PASSWORD=$N8N_DB_PASSWORD|" .env
     print_success "Generated N8N_DB_PASSWORD"
+    
+    # Generate Dashboard password
+    DASHBOARD_PASSWORD=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
+    sed -i.bak "s/your-dashboard-password/$DASHBOARD_PASSWORD/" .env
+    print_success "Generated DASHBOARD_PASSWORD"
+    
+    # Generate Secret Key Base
+    SECRET_KEY_BASE=$(openssl rand -base64 64 | tr -d '\n')
+    sed -i.bak "s|your-very-long-secret-key-base-for-realtime-service|$SECRET_KEY_BASE|" .env
+    print_success "Generated SECRET_KEY_BASE"
+
+    # Generate Supabase JWT Keys
+    echo ""
+    echo "Generating Supabase JWT keys..."
+
+    # Create a temporary Node.js script to generate JWTs
+    cat > /tmp/generate-jwt.js << 'JSEOF'
+const crypto = require('crypto');
+
+const secret = process.argv[2];
+const role = process.argv[3];
+
+function base64url(source) {
+    let encodedSource = Buffer.from(source).toString('base64');
+    encodedSource = encodedSource.replace(/=+$/, '');
+    encodedSource = encodedSource.replace(/\+/g, '-');
+    encodedSource = encodedSource.replace(/\//g, '_');
+    return encodedSource;
+}
+
+function createJWT(payload, secret) {
+    const header = { alg: 'HS256', typ: 'JWT' };
+    const headerStr = base64url(JSON.stringify(header));
+    const payloadStr = base64url(JSON.stringify(payload));
+    const signature = crypto
+        .createHmac('sha256', secret)
+        .update(headerStr + '.' + payloadStr)
+        .digest('base64')
+        .replace(/=+$/, '')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
+    return headerStr + '.' + payloadStr + '.' + signature;
+}
+
+const payload = {
+    role: role,
+    iss: 'supabase',
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + (10 * 365 * 24 * 60 * 60) // 10 years
+};
+
+console.log(createJWT(payload, secret));
+JSEOF
+
+    # Check if Node.js is available
+    if command -v node &> /dev/null; then
+        SUPABASE_ANON_KEY=$(node /tmp/generate-jwt.js "$JWT_SECRET" "anon")
+        SUPABASE_SERVICE_KEY=$(node /tmp/generate-jwt.js "$JWT_SECRET" "service_role")
+
+        sed -i.bak "s/your-anon-key/$SUPABASE_ANON_KEY/" .env
+        sed -i.bak "s/your-service-key/$SUPABASE_SERVICE_KEY/" .env
+
+        print_success "Generated SUPABASE_ANON_KEY"
+        print_success "Generated SUPABASE_SERVICE_KEY"
+
+        rm -f /tmp/generate-jwt.js
+    else
+        print_warning "Node.js not found. Generating JWT keys with openssl fallback..."
+
+        # Fallback: Use Python if available
+        if command -v python3 &> /dev/null; then
+            SUPABASE_ANON_KEY=$(python3 << PYEOF
+import hmac, hashlib, base64, json, time
+
+def base64url_encode(data):
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode()
+
+secret = "$JWT_SECRET"
+header = base64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+payload = base64url_encode(json.dumps({
+    "role": "anon",
+    "iss": "supabase",
+    "iat": int(time.time()),
+    "exp": int(time.time()) + 315360000
+}).encode())
+sig = base64url_encode(hmac.new(secret.encode(), f"{header}.{payload}".encode(), hashlib.sha256).digest())
+print(f"{header}.{payload}.{sig}")
+PYEOF
+)
+            SUPABASE_SERVICE_KEY=$(python3 << PYEOF
+import hmac, hashlib, base64, json, time
+
+def base64url_encode(data):
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode()
+
+secret = "$JWT_SECRET"
+header = base64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+payload = base64url_encode(json.dumps({
+    "role": "service_role",
+    "iss": "supabase",
+    "iat": int(time.time()),
+    "exp": int(time.time()) + 315360000
+}).encode())
+sig = base64url_encode(hmac.new(secret.encode(), f"{header}.{payload}".encode(), hashlib.sha256).digest())
+print(f"{header}.{payload}.{sig}")
+PYEOF
+)
+            sed -i.bak "s/your-anon-key/$SUPABASE_ANON_KEY/" .env
+            sed -i.bak "s/your-service-key/$SUPABASE_SERVICE_KEY/" .env
+
+            print_success "Generated SUPABASE_ANON_KEY"
+            print_success "Generated SUPABASE_SERVICE_KEY"
+        else
+            print_error "Neither Node.js nor Python3 found. Please install one to generate JWT keys."
+            print_warning "You can manually generate keys at: https://supabase.com/docs/guides/self-hosting#api-keys"
+        fi
+    fi
+
+    # Cleanup backup files
+    rm -f .env.bak
+    
 
     echo ""
     print_warning "Generated credentials saved to .env"
