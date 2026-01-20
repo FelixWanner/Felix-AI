@@ -61,14 +61,14 @@ const n8nApi = {
   async getWorkflows(): Promise<N8nWorkflow[]> {
     const response = await this.fetch('/api/v1/workflows');
     if (!response.ok) throw new Error(`Failed to fetch workflows: ${response.status}`);
-    const data = await response.json();
+    const data = (await response.json()) as { data?: N8nWorkflow[] };
     return data.data || [];
   },
 
   async getWorkflow(id: string): Promise<N8nWorkflow> {
     const response = await this.fetch(`/api/v1/workflows/${id}`);
     if (!response.ok) throw new Error(`Failed to fetch workflow: ${response.status}`);
-    return response.json();
+    return (await response.json()) as N8nWorkflow;
   },
 
   async triggerWorkflow(id: string, data?: Record<string, unknown>): Promise<N8nExecution> {
@@ -77,14 +77,14 @@ const n8nApi = {
       body: JSON.stringify(data || {}),
     });
     if (!response.ok) throw new Error(`Failed to trigger workflow: ${response.status}`);
-    return response.json();
+    return (await response.json()) as N8nExecution;
   },
 
   async getExecutions(workflowId?: string): Promise<N8nExecution[]> {
     const query = workflowId ? `?workflowId=${workflowId}` : '';
     const response = await this.fetch(`/api/v1/executions${query}`);
     if (!response.ok) throw new Error(`Failed to fetch executions: ${response.status}`);
-    const data = await response.json();
+    const data = (await response.json()) as { data?: N8nExecution[] };
     return data.data || [];
   },
 };
