@@ -141,6 +141,8 @@ services:
     command:
       - postgres
       - -c
+      - listen_addresses=*
+      - -c
       - wal_level=logical
       - -c
       - max_connections=200
