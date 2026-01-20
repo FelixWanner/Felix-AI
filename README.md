@@ -139,6 +139,28 @@ life-os/
 
 ---
 
+## 🧪 Tests
+
+```bash
+# Dependencies installieren
+npm install
+
+# Alle Tests ausführen (erfordert laufende Services)
+npm test
+
+# Tests mit Coverage
+npm run test:coverage
+
+# Einzelne Test-Suites
+npm run test:supabase    # Datenbank-Tests
+npm run test:n8n         # Workflow-Tests
+npm run test:telegram    # Bot-Tests
+```
+
+**Hinweis:** Die Integration-Tests erfordern laufende Docker-Container. Starte sie mit `docker compose up -d` bevor du die Tests ausführst.
+
+---
+
 ## 🤝 Entwicklung
 
 Dieses Projekt wurde mit [Claude Code](https://www.anthropic.com/claude-code) entwickelt.
