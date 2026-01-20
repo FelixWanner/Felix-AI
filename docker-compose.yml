@@ -148,7 +148,7 @@ services:
 
   # Supabase Studio (Admin UI)
   supabase-studio:
-    image: supabase/studio:20240101-0942bfe
+    image: supabase/studio:latest
     container_name: lifeos-studio
     restart: unless-stopped
     healthcheck:
