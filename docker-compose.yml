@@ -294,7 +294,7 @@ services:
 
   # Meta Service (für Studio)
   supabase-meta:
-    image: supabase/postgres-meta:latest
+    image: supabase/postgres-meta:v0.84.2
     container_name: lifeos-meta
     restart: unless-stopped
     healthcheck:
