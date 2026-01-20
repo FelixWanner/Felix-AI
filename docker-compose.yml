@@ -114,7 +114,7 @@ services:
   
   # PostgreSQL Database
   supabase-db:
-    image: supabase/postgres:latest
+    image: supabase/postgres:15.8.1.085
     container_name: lifeos-db
     restart: unless-stopped
     healthcheck:
@@ -148,7 +148,7 @@ services:
 
   # Supabase Studio (Admin UI)
   supabase-studio:
-    image: supabase/studio:latest
+    image: supabase/studio:2025.12.17-sha-43f4f7f
     container_name: lifeos-studio
     restart: unless-stopped
     healthcheck:
@@ -173,7 +173,7 @@ services:
 
   # Kong API Gateway
   supabase-kong:
-    image: kong:latest
+    image: kong:2.8.1
     container_name: lifeos-kong
     restart: unless-stopped
     entrypoint: bash -c 'eval "echo \"$$(cat ~/temp.yml)\"" > ~/kong.yml && /docker-entrypoint.sh kong docker-start'
@@ -200,7 +200,7 @@ services:
 
   # Auth Service (GoTrue)
   supabase-auth:
-    image: supabase/gotrue:latest
+    image: supabase/gotrue:v2.184.0
     container_name: lifeos-auth
     restart: unless-stopped
     healthcheck:
@@ -238,7 +238,7 @@ services:
 
   # REST API (PostgREST)
   supabase-rest:
-    image: postgrest/postgrest:latest
+    image: postgrest/postgrest:v12.2.0
     container_name: lifeos-rest
     restart: unless-stopped
     healthcheck:
@@ -262,7 +262,7 @@ services:
 
   # Realtime Service
   supabase-realtime:
-    image: supabase/realtime:latest
+    image: supabase/realtime:v2.68.0
     container_name: lifeos-realtime
     restart: unless-stopped
     healthcheck:
@@ -294,7 +294,7 @@ services:
 
   # Meta Service (für Studio)
   supabase-meta:
-    image: supabase/postgres-meta:v0.84.2
+    image: supabase/postgres-meta:v0.95.1
     container_name: lifeos-meta
     restart: unless-stopped
     healthcheck:
@@ -317,7 +317,7 @@ services:
 
   # Storage API
   supabase-storage:
-    image: supabase/storage-api:latest
+    image: supabase/storage-api:v1.33.0
     container_name: lifeos-storage
     restart: unless-stopped
     healthcheck:
@@ -351,7 +351,7 @@ services:
 
   # Image Proxy (für Storage)
   supabase-imgproxy:
-    image: darthsim/imgproxy:latest
+    image: darthsim/imgproxy:v3.8.0
     container_name: lifeos-imgproxy
     restart: unless-stopped
     healthcheck:
