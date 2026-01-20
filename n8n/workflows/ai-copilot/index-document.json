@@ -1,0 +1,558 @@
+{
+  "name": "Index Document for RAG",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "index-document",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "index-document-webhook"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  d.id,\n  d.title,\n  d.document_type,\n  d.file_path,\n  d.mime_type,\n  d.property_id,\n  d.unit_id,\n  d.tenant_id,\n  d.metadata,\n  p.name as property_name,\n  p.street as property_street\nFROM documents d\nLEFT JOIN properties p ON p.id = d.property_id\nWHERE d.id = '{{ $json.document_id }}'::UUID\n  AND d.is_indexed = false",
+        "options": {}
+      },
+      "id": "get-document",
+      "name": "Get Document Metadata",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-exists",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-document-exists",
+      "name": "Document Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/storage/v1/object/{{ $json.file_path }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "download-file",
+      "name": "Download from Supabase Storage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "supabase-storage-auth",
+          "name": "Supabase Storage Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check mime type and extract text accordingly\nconst document = $('Get Document Metadata').first().json;\nconst fileData = $input.first().binary?.data;\n\nif (!fileData) {\n  return { error: 'No file data received' };\n}\n\nconst mimeType = document.mime_type || 'application/pdf';\nlet extractedText = '';\n\n// For PDF files, we'll use an external extraction service or built-in\n// In n8n, you can use the \"Extract from File\" node or external service\n// Here we'll prepare the data for the next step\n\nreturn {\n  document_id: document.id,\n  title: document.title,\n  document_type: document.document_type,\n  property_id: document.property_id,\n  property_name: document.property_name,\n  property_street: document.property_street,\n  unit_id: document.unit_id,\n  tenant_id: document.tenant_id,\n  mime_type: mimeType,\n  file_data: fileData,\n  metadata: document.metadata || {}\n};"
+      },
+      "id": "prepare-extraction",
+      "name": "Prepare for Extraction",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "command": "={{ $json.extraction_command }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "extract-text",
+      "name": "Extract Text (pdftotext)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare the extraction command\n// Assumes pdftotext is installed (part of poppler-utils)\nconst fs = require('fs');\nconst path = require('path');\nconst crypto = require('crypto');\n\nconst input = $input.first().json;\nconst fileData = input.file_data;\n\n// Create temp file path\nconst tempId = crypto.randomBytes(8).toString('hex');\nconst tempPdfPath = `/tmp/doc_${tempId}.pdf`;\nconst tempTxtPath = `/tmp/doc_${tempId}.txt`;\n\n// Write binary data to temp file\nif (fileData) {\n  const buffer = Buffer.from(fileData, 'base64');\n  fs.writeFileSync(tempPdfPath, buffer);\n}\n\n// Return the command to execute\nreturn {\n  ...input,\n  temp_pdf_path: tempPdfPath,\n  temp_txt_path: tempTxtPath,\n  extraction_command: `pdftotext -layout \"${tempPdfPath}\" \"${tempTxtPath}\" && cat \"${tempTxtPath}\" && rm -f \"${tempPdfPath}\" \"${tempTxtPath}\"`\n};"
+      },
+      "id": "prepare-command",
+      "name": "Prepare Extraction Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse extracted text and create chunks\nconst input = $('Prepare Extraction Command').first().json;\nconst stdout = $input.first().json.stdout || '';\nconst stderr = $input.first().json.stderr || '';\n\nif (!stdout && stderr) {\n  return { error: `Text extraction failed: ${stderr}` };\n}\n\nconst text = stdout.trim();\n\nif (!text || text.length < 50) {\n  return { error: 'Extracted text too short or empty' };\n}\n\n// Tokenization approximation: ~4 chars per token for German/English\nconst CHARS_PER_TOKEN = 4;\nconst CHUNK_SIZE_TOKENS = 500;\nconst OVERLAP_TOKENS = 50;\n\nconst CHUNK_SIZE_CHARS = CHUNK_SIZE_TOKENS * CHARS_PER_TOKEN; // 2000 chars\nconst OVERLAP_CHARS = OVERLAP_TOKENS * CHARS_PER_TOKEN; // 200 chars\n\n// Split text into sentences first for better chunking\nconst sentences = text.split(/(?<=[.!?])\\s+/);\n\nconst chunks = [];\nlet currentChunk = '';\nlet chunkIndex = 0;\n\nfor (const sentence of sentences) {\n  // If adding this sentence exceeds chunk size, save current and start new\n  if (currentChunk.length + sentence.length > CHUNK_SIZE_CHARS && currentChunk.length > 0) {\n    chunks.push({\n      chunk_index: chunkIndex,\n      content: currentChunk.trim(),\n      char_count: currentChunk.length,\n      approx_tokens: Math.ceil(currentChunk.length / CHARS_PER_TOKEN)\n    });\n    \n    // Start new chunk with overlap from end of previous\n    const overlapStart = Math.max(0, currentChunk.length - OVERLAP_CHARS);\n    currentChunk = currentChunk.substring(overlapStart) + ' ' + sentence;\n    chunkIndex++;\n  } else {\n    currentChunk += (currentChunk ? ' ' : '') + sentence;\n  }\n}\n\n// Don't forget the last chunk\nif (currentChunk.trim().length > 0) {\n  chunks.push({\n    chunk_index: chunkIndex,\n    content: currentChunk.trim(),\n    char_count: currentChunk.length,\n    approx_tokens: Math.ceil(currentChunk.length / CHARS_PER_TOKEN)\n  });\n}\n\nreturn {\n  document_id: input.document_id,\n  title: input.title,\n  document_type: input.document_type,\n  property_id: input.property_id,\n  property_name: input.property_name,\n  unit_id: input.unit_id,\n  tenant_id: input.tenant_id,\n  total_chars: text.length,\n  total_chunks: chunks.length,\n  chunks: chunks,\n  metadata: {\n    ...input.metadata,\n    property_street: input.property_street,\n    indexed_at: new Date().toISOString()\n  }\n};"
+      },
+      "id": "chunk-text",
+      "name": "Chunk Text (500 tokens, 50 overlap)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Split chunks into individual items for parallel embedding\nconst data = $input.first().json;\n\nif (data.error) {\n  return [{ json: data }];\n}\n\nconst items = data.chunks.map(chunk => ({\n  json: {\n    document_id: data.document_id,\n    title: data.title,\n    document_type: data.document_type,\n    property_id: data.property_id,\n    unit_id: data.unit_id,\n    tenant_id: data.tenant_id,\n    chunk_index: chunk.chunk_index,\n    content: chunk.content,\n    total_chunks: data.total_chunks,\n    metadata: data.metadata\n  }\n}));\n\nreturn items;"
+      },
+      "id": "split-chunks",
+      "name": "Split Into Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 200]
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "id": "batch-chunks",
+      "name": "Batch Chunks",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [2220, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"text-embedding-3-small\",\n  \"input\": {{ JSON.stringify($json.content) }},\n  \"dimensions\": 1536\n}",
+        "options": {}
+      },
+      "id": "create-embedding",
+      "name": "Create OpenAI Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "openai-api",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine chunk data with embedding\nconst chunkData = $('Batch Chunks').first().json;\nconst embeddingResponse = $input.first().json;\n\nif (!embeddingResponse.data || !embeddingResponse.data[0]) {\n  return { error: 'No embedding received from OpenAI' };\n}\n\nconst embedding = embeddingResponse.data[0].embedding;\n\nreturn {\n  document_id: chunkData.document_id,\n  chunk_index: chunkData.chunk_index,\n  content: chunkData.content,\n  embedding: `[${embedding.join(',')}]`,\n  metadata: JSON.stringify({\n    ...chunkData.metadata,\n    title: chunkData.title,\n    document_type: chunkData.document_type,\n    property_id: chunkData.property_id,\n    unit_id: chunkData.unit_id,\n    tenant_id: chunkData.tenant_id,\n    total_chunks: chunkData.total_chunks\n  })\n};"
+      },
+      "id": "prepare-embedding-data",
+      "name": "Prepare Embedding Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2660, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO document_embeddings (\n  document_id,\n  chunk_index,\n  content,\n  embedding,\n  metadata\n) VALUES (\n  '{{ $json.document_id }}'::UUID,\n  {{ $json.chunk_index }},\n  {{ $json.content }},\n  '{{ $json.embedding }}'::vector(1536),\n  '{{ $json.metadata }}'::JSONB\n)\nON CONFLICT (document_id, chunk_index) DO UPDATE SET\n  content = EXCLUDED.content,\n  embedding = EXCLUDED.embedding,\n  metadata = EXCLUDED.metadata",
+        "options": {}
+      },
+      "id": "insert-embedding",
+      "name": "Insert Embedding",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2880, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-done",
+              "leftValue": "={{ $('Batch Chunks').first().context.noItemsLeft }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-all-done",
+      "name": "All Chunks Done?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [3100, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE documents \nSET is_indexed = true\nWHERE id = '{{ $('Get Document Metadata').first().json.id }}'::UUID\nRETURNING id, title, is_indexed",
+        "options": {}
+      },
+      "id": "mark-indexed",
+      "name": "Mark Document as Indexed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3320, 100],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "=:card_index_dividers: **Dokument indexiert!**\n\n:page_facing_up: {{ $('Get Document Metadata').first().json.title }}\n:file_folder: Typ: {{ $('Get Document Metadata').first().json.document_type || 'Unbekannt' }}\n:house: {{ $('Get Document Metadata').first().json.property_name || 'Keine Immobilie' }}\n\n:jigsaw: {{ $('Chunk Text (500 tokens, 50 overlap)').first().json.total_chunks }} Chunks erstellt\n:brain: Embeddings gespeichert\n\nDas Dokument ist jetzt durchsuchbar!",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-success",
+      "name": "Send Success Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [3540, 100],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Life OS Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"document_id\": \"{{ $('Get Document Metadata').first().json.id }}\",\n  \"title\": \"{{ $('Get Document Metadata').first().json.title }}\",\n  \"chunks_created\": {{ $('Chunk Text (500 tokens, 50 overlap)').first().json.total_chunks }},\n  \"message\": \"Document indexed successfully\"\n}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [3760, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": false,\n  \"error\": \"Document not found or already indexed\",\n  \"document_id\": \"{{ $json.document_id }}\"\n}",
+        "options": {
+          "responseCode": 404
+        }
+      },
+      "id": "respond-not-found",
+      "name": "Respond Not Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {},
+      "id": "no-op-end",
+      "name": "End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [3980, 200]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Document Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Document Metadata": {
+      "main": [
+        [
+          {
+            "node": "Document Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Document Exists?": {
+      "main": [
+        [
+          {
+            "node": "Download from Supabase Storage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download from Supabase Storage": {
+      "main": [
+        [
+          {
+            "node": "Prepare for Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare for Extraction": {
+      "main": [
+        [
+          {
+            "node": "Prepare Extraction Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Extraction Command": {
+      "main": [
+        [
+          {
+            "node": "Extract Text (pdftotext)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Text (pdftotext)": {
+      "main": [
+        [
+          {
+            "node": "Chunk Text (500 tokens, 50 overlap)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk Text (500 tokens, 50 overlap)": {
+      "main": [
+        [
+          {
+            "node": "Split Into Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Into Items": {
+      "main": [
+        [
+          {
+            "node": "Batch Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Chunks": {
+      "main": [
+        [
+          {
+            "node": "Create OpenAI Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create OpenAI Embedding": {
+      "main": [
+        [
+          {
+            "node": "Prepare Embedding Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Embedding Data": {
+      "main": [
+        [
+          {
+            "node": "Insert Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Embedding": {
+      "main": [
+        [
+          {
+            "node": "All Chunks Done?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "All Chunks Done?": {
+      "main": [
+        [
+          {
+            "node": "Mark Document as Indexed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Batch Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Document as Indexed": {
+      "main": [
+        [
+          {
+            "node": "Send Success Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Success Notification": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Success": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Not Found": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "life-os"
+  },
+  "tags": [
+    {
+      "name": "ai-copilot",
+      "id": "ai-copilot-tag"
+    },
+    {
+      "name": "rag",
+      "id": "rag-tag"
+    },
+    {
+      "name": "documents",
+      "id": "documents-tag"
+    }
+  ],
+  "pinData": {},
+  "staticData": null,
+  "triggerCount": 0
+}

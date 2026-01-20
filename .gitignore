@@ -1,3 +1,17 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
+frontend/node_modules/
+telegram-bot/node_modules/
+
+# Build outputs
+frontend/dist/
+frontend/build/
+telegram-bot/dist/
 # ═══════════════════════════════════════════════════════════════
 # Life OS - Git Ignore
 # ═══════════════════════════════════════════════════════════════
@@ -31,11 +45,24 @@ out/
 Thumbs.db
 
 # Logs
+*.log
+logs/
 logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Docker volumes (local data)
+docker-data/
+volumes/
+
+# Supabase local
+supabase/.temp/
+supabase/.branches/
+
+# n8n local data
+n8n-data/
 
 # Test coverage
 coverage/
@@ -57,6 +84,30 @@ tmp/
 temp/
 *.tmp
 
+# Credentials (NEVER commit!)
+*.pem
+*.key
+*.cert
+credentials.json
+service-account.json
+
+# Backups
+*.bak
+*.backup
+backups/
+
+# Cache
+.cache/
+.parcel-cache/
+
+# TypeScript
+*.tsbuildinfo
+
+# Python (for scripts)
+__pycache__/
+*.py[cod]
+venv/
+.venv/
 # Secrets (never commit these)
 *.pem
 *.key
