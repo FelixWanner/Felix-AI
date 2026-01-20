@@ -135,7 +135,7 @@ services:
       N8N_DB_PASSWORD: ${N8N_DB_PASSWORD}
     volumes:
       - supabase_db_data:/var/lib/postgresql/data
-      - ./supabase/migrations:/docker-entrypoint-initdb.d:ro
+      # Note: Custom migrations removed - Supabase image handles schema initialization
     networks:
       - lifeos-net
     command:
