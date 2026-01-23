@@ -14,6 +14,90 @@
 }
 
 # ═══════════════════════════════════════════════════════════════
+# LOCALHOST - Development Access
+# ═══════════════════════════════════════════════════════════════
+
+# ───────────────────────────────────────────────────────────────
+# Frontend Dashboard
+# http://localhost or http://dashboard.localhost
+# ───────────────────────────────────────────────────────────────
+:80 {
+	reverse_proxy frontend:80
+
+	encode gzip zstd
+
+	header {
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}
+
+http://dashboard.localhost {
+	reverse_proxy frontend:80
+
+	encode gzip zstd
+
+	header {
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# n8n Workflow Automation
+# http://n8n.localhost
+# ───────────────────────────────────────────────────────────────
+http://n8n.localhost {
+	reverse_proxy n8n:5678
+
+	# WebSocket Support für n8n
+	@websockets {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	reverse_proxy @websockets n8n:5678
+
+	header {
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# Supabase API (Kong Gateway)
+# http://api.localhost
+# ───────────────────────────────────────────────────────────────
+http://api.localhost {
+	reverse_proxy supabase-kong:8000
+
+	# CORS Headers
+	header {
+		Access-Control-Allow-Origin *
+		Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info"
+		Access-Control-Max-Age 86400
+		-Server
+	}
+
+	# Handle preflight requests
+	@options method OPTIONS
+	respond @options 204
+}
+
+# ───────────────────────────────────────────────────────────────
+# Supabase Studio (Admin Dashboard)
+# http://studio.localhost
+# ───────────────────────────────────────────────────────────────
+http://studio.localhost {
+	reverse_proxy supabase-studio:3000
+
+	header {
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}
+
+# ═══════════════════════════════════════════════════════════════
 # PRODUCTION - life-os.fwanner.de
 # ═══════════════════════════════════════════════════════════════
 
@@ -22,7 +106,7 @@
 # https://life-os.fwanner.de
 # ───────────────────────────────────────────────────────────────
 life-os.fwanner.de {
-	reverse_proxy frontend:3000
+	reverse_proxy frontend:80
 
 	encode gzip zstd
 
