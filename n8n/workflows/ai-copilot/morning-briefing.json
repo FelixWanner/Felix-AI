@@ -16,7 +16,10 @@
       "name": "Daily 06:30",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
-      "position": [250, 300]
+      "position": [
+        250,
+        300
+      ]
     },
     {
       "parameters": {
@@ -32,7 +35,10 @@
       "name": "Get Sleep Data",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [450, 200],
+      "position": [
+        450,
+        200
+      ],
       "credentials": {
         "supabaseApi": {
           "id": "supabase-creds",
@@ -54,7 +60,10 @@
       "name": "Get Priority Tasks",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [450, 300],
+      "position": [
+        450,
+        300
+      ],
       "credentials": {
         "supabaseApi": {
           "id": "supabase-creds",
@@ -76,7 +85,10 @@
       "name": "Get Today Meetings",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [450, 400],
+      "position": [
+        450,
+        400
+      ],
       "credentials": {
         "supabaseApi": {
           "id": "supabase-creds",
@@ -98,7 +110,10 @@
       "name": "Get Readiness",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [450, 500],
+      "position": [
+        450,
+        500
+      ],
       "credentials": {
         "supabaseApi": {
           "id": "supabase-creds",
@@ -114,7 +129,10 @@
       "name": "Generate Briefing",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [700, 300]
+      "position": [
+        700,
+        300
+      ]
     },
     {
       "parameters": {
@@ -128,7 +146,10 @@
       "name": "Save Briefing",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [900, 200],
+      "position": [
+        900,
+        200
+      ],
       "credentials": {
         "supabaseApi": {
           "id": "supabase-creds",
@@ -148,7 +169,10 @@
       "name": "Send to Telegram",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [900, 400],
+      "position": [
+        900,
+        400
+      ],
       "credentials": {
         "telegramApi": {
           "id": "telegram-creds",
@@ -249,7 +273,6 @@
     "executionOrder": "v1"
   },
   "staticData": null,
-  "tags": ["telegram", "briefing", "ai-copilot", "scheduled"],
   "triggerCount": 0,
   "updatedAt": "2025-01-20T00:00:00.000Z",
   "versionId": "1"

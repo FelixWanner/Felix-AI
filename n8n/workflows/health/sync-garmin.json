@@ -1,5 +1,5 @@
 {
-  "name": "Sync Garmin Daily Stats",
+  "name": "Sync Garmin (Old)",
   "nodes": [
     {
       "parameters": {
@@ -16,7 +16,10 @@
       "name": "Daily 08:00",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
-      "position": [250, 300]
+      "position": [
+        250,
+        300
+      ]
     },
     {
       "parameters": {
@@ -38,7 +41,10 @@
       "name": "Get Garmin Summary",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [450, 200],
+      "position": [
+        450,
+        200
+      ],
       "credentials": {
         "httpBasicAuth": {
           "id": "garmin-creds",
@@ -66,7 +72,10 @@
       "name": "Get Garmin Sleep",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [450, 300],
+      "position": [
+        450,
+        300
+      ],
       "credentials": {
         "httpBasicAuth": {
           "id": "garmin-creds",
@@ -94,7 +103,10 @@
       "name": "Get Garmin Stress",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [450, 400],
+      "position": [
+        450,
+        400
+      ],
       "credentials": {
         "httpBasicAuth": {
           "id": "garmin-creds",
@@ -110,7 +122,10 @@
       "name": "Merge Garmin Data",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [700, 300]
+      "position": [
+        700,
+        300
+      ]
     },
     {
       "parameters": {
@@ -125,7 +140,10 @@
       "name": "Save to Supabase",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [900, 300],
+      "position": [
+        900,
+        300
+      ],
       "credentials": {
         "supabaseApi": {
           "id": "supabase-creds",
@@ -153,7 +171,10 @@
       "name": "Update Sync Status",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [1100, 300],
+      "position": [
+        1100,
+        300
+      ],
       "credentials": {
         "supabaseApi": {
           "id": "supabase-creds",
@@ -244,7 +265,6 @@
     "executionOrder": "v1"
   },
   "staticData": null,
-  "tags": ["health", "garmin", "sync", "scheduled"],
   "triggerCount": 0,
   "updatedAt": "2025-01-20T00:00:00.000Z",
   "versionId": "1"

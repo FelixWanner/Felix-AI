@@ -12,7 +12,10 @@
       "name": "Telegram Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
-      "position": [250, 300]
+      "position": [
+        250,
+        300
+      ]
     },
     {
       "parameters": {
@@ -30,7 +33,10 @@
       "name": "Is Command?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [450, 300]
+      "position": [
+        450,
+        300
+      ]
     },
     {
       "parameters": {
@@ -47,7 +53,10 @@
       "name": "Is Voice?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [650, 400]
+      "position": [
+        650,
+        400
+      ]
     },
     {
       "parameters": {
@@ -57,7 +66,10 @@
       "name": "Parse Command",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [650, 200]
+      "position": [
+        650,
+        200
+      ]
     },
     {
       "parameters": {
@@ -139,7 +151,10 @@
       "name": "Route Command",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
-      "position": [850, 200]
+      "position": [
+        850,
+        200
+      ]
     },
     {
       "parameters": {
@@ -153,7 +168,10 @@
       "name": "Create Inbox Item",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [1050, 100],
+      "position": [
+        1050,
+        100
+      ],
       "credentials": {
         "supabaseApi": {
           "id": "supabase-creds",
@@ -173,7 +191,10 @@
       "name": "Send Response",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
-      "position": [1250, 300],
+      "position": [
+        1250,
+        300
+      ],
       "credentials": {
         "telegramApi": {
           "id": "telegram-creds",
@@ -191,7 +212,10 @@
       "name": "Respond OK",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [1450, 300]
+      "position": [
+        1450,
+        300
+      ]
     }
   ],
   "connections": {
@@ -251,7 +275,6 @@
     "executionOrder": "v1"
   },
   "staticData": null,
-  "tags": ["telegram", "bot", "ai-copilot"],
   "triggerCount": 0,
   "updatedAt": "2025-01-20T00:00:00.000Z",
   "versionId": "1"

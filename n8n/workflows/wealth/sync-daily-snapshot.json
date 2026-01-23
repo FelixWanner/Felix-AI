@@ -16,7 +16,10 @@
       "name": "Daily 23:00",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
-      "position": [250, 300]
+      "position": [
+        250,
+        300
+      ]
     },
     {
       "parameters": {
@@ -31,7 +34,10 @@
       "name": "Get All Accounts",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [450, 200],
+      "position": [
+        450,
+        200
+      ],
       "credentials": {
         "supabaseApi": {
           "id": "supabase-creds",
@@ -50,7 +56,10 @@
       "name": "Get Properties",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [450, 300],
+      "position": [
+        450,
+        300
+      ],
       "credentials": {
         "supabaseApi": {
           "id": "supabase-creds",
@@ -69,7 +78,10 @@
       "name": "Get Positions",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [450, 400],
+      "position": [
+        450,
+        400
+      ],
       "credentials": {
         "supabaseApi": {
           "id": "supabase-creds",
@@ -88,7 +100,10 @@
       "name": "Get Companies",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [450, 500],
+      "position": [
+        450,
+        500
+      ],
       "credentials": {
         "supabaseApi": {
           "id": "supabase-creds",
@@ -107,7 +122,10 @@
       "name": "Get Loans",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [450, 600],
+      "position": [
+        450,
+        600
+      ],
       "credentials": {
         "supabaseApi": {
           "id": "supabase-creds",
@@ -123,7 +141,10 @@
       "name": "Calculate Snapshot",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [700, 350]
+      "position": [
+        700,
+        350
+      ]
     },
     {
       "parameters": {
@@ -138,7 +159,10 @@
       "name": "Save Snapshot",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [900, 350],
+      "position": [
+        900,
+        350
+      ],
       "credentials": {
         "supabaseApi": {
           "id": "supabase-creds",
@@ -154,7 +178,10 @@
       "name": "Format Message",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1100, 350]
+      "position": [
+        1100,
+        350
+      ]
     }
   ],
   "connections": {
@@ -271,7 +298,6 @@
     "executionOrder": "v1"
   },
   "staticData": null,
-  "tags": ["wealth", "snapshot", "scheduled"],
   "triggerCount": 0,
   "updatedAt": "2025-01-20T00:00:00.000Z",
   "versionId": "1"

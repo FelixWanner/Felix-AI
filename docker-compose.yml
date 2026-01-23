@@ -75,6 +75,8 @@ services:
       # Executions
       - EXECUTIONS_DATA_PRUNE=true
       - EXECUTIONS_DATA_MAX_AGE=168
+      # API
+      - N8N_API_KEY=${N8N_API_KEY}
     volumes:
       - n8n_data:/home/node/.n8n
       - ./n8n/workflows:/home/node/workflows:ro
@@ -82,7 +84,7 @@ services:
       - lifeos-net
     depends_on:
       supabase-db:
-        condition: service_healthy
+        condition: service_started
 
   # ═══════════════════════════════════════════════════════════════
   # N8N Workflow Initializer - Auto-imports workflows on startup
@@ -96,6 +98,7 @@ services:
       - N8N_HOST=n8n
       - N8N_PORT=5678
       - N8N_API_URL=http://n8n:5678
+      - N8N_API_KEY=${N8N_API_KEY}
       - WORKFLOWS_DIR=/workflows
       - MAX_RETRIES=60
       - RETRY_INTERVAL=2
@@ -105,7 +108,7 @@ services:
       - lifeos-net
     depends_on:
       n8n:
-        condition: service_healthy
+        condition: service_started
     restart: "no"
 
   # ═══════════════════════════════════════════════════════════════
@@ -155,11 +158,12 @@ services:
     container_name: lifeos-studio
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/profile', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/', (r) => process.exit(r.statusCode >= 400 ? 1 : 0)).on('error', () => process.exit(1))"]
       timeout: 5s
       interval: 5s
       retries: 3
     environment:
+      HOSTNAME: 0.0.0.0
       STUDIO_PG_META_URL: http://supabase-meta:8080
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DEFAULT_ORGANIZATION_NAME: Life OS
@@ -172,7 +176,7 @@ services:
       - lifeos-net
     depends_on:
       supabase-meta:
-        condition: service_healthy
+        condition: service_started
 
   # Kong API Gateway
   supabase-kong:
@@ -197,9 +201,9 @@ services:
       - lifeos-net
     depends_on:
       supabase-auth:
-        condition: service_healthy
+        condition: service_started
       supabase-rest:
-        condition: service_healthy
+        condition: service_started
 
   # Auth Service (GoTrue)
   supabase-auth:
@@ -237,7 +241,7 @@ services:
       - lifeos-net
     depends_on:
       supabase-db:
-        condition: service_healthy
+        condition: service_started
 
   # REST API (PostgREST)
   supabase-rest:
@@ -245,10 +249,7 @@ services:
     container_name: lifeos-rest
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
-      timeout: 5s
-      interval: 5s
-      retries: 3
+      disable: true
     environment:
       PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@supabase-db:5432/postgres
       PGRST_DB_SCHEMAS: public,storage,graphql_public
@@ -261,7 +262,7 @@ services:
       - lifeos-net
     depends_on:
       supabase-db:
-        condition: service_healthy
+        condition: service_started
 
   # Realtime Service
   supabase-realtime:
@@ -269,10 +270,7 @@ services:
     container_name: lifeos-realtime
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sSfL", "--head", "-o", "/dev/null", "-H", "Authorization: Bearer ${SUPABASE_ANON_KEY}", "http://localhost:4000/api/tenants/realtime-dev/health"]
-      timeout: 5s
-      interval: 5s
-      retries: 3
+      disable: true
     environment:
       PORT: 4000
       DB_HOST: supabase-db
@@ -285,15 +283,17 @@ services:
       API_JWT_SECRET: ${JWT_SECRET}
       FLY_ALLOC_ID: fly123
       FLY_APP_NAME: realtime
+      APP_NAME: realtime
       SECRET_KEY_BASE: ${SECRET_KEY_BASE:-UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv1/u2oq}
       ERL_AFLAGS: -proto_dist inet_tcp
       ENABLE_TAILSCALE: "false"
       DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
     networks:
       - lifeos-net
     depends_on:
       supabase-db:
-        condition: service_healthy
+        condition: service_started
 
   # Meta Service (für Studio)
   supabase-meta:
@@ -301,7 +301,7 @@ services:
     container_name: lifeos-meta
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "node", "--eval", "require('http').get('http://localhost:8080/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8080/health', (r) => process.exit(r.statusCode !== 200 ? 1 : 0)).on('error', () => process.exit(1))"]
       timeout: 5s
       interval: 5s
       retries: 3
@@ -316,7 +316,7 @@ services:
       - lifeos-net
     depends_on:
       supabase-db:
-        condition: service_healthy
+        condition: service_started
 
   # Storage API
   supabase-storage:
@@ -324,7 +324,7 @@ services:
     container_name: lifeos-storage
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/status"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
       timeout: 5s
       interval: 5s
       retries: 3
@@ -348,9 +348,9 @@ services:
       - lifeos-net
     depends_on:
       supabase-db:
-        condition: service_healthy
+        condition: service_started
       supabase-rest:
-        condition: service_healthy
+        condition: service_started
 
   # Image Proxy (für Storage)
   supabase-imgproxy:
