@@ -18,6 +18,7 @@ import {
   useTodayHabits,
   useTodayMeetings,
   useTodayTasks,
+  useToggleHabit,
 } from '@/hooks/useDashboard'
 
 // ─────────────────────────────────────────────────────────────
@@ -210,6 +211,7 @@ function GarminStatsCard() {
 
 function HabitsCard() {
   const { data: habits, isLoading } = useTodayHabits()
+  const toggleHabit = useToggleHabit()
 
   const { completed, total, percentage } = useMemo(() => {
     if (!habits) return { completed: 0, total: 0, percentage: 0 }
@@ -221,6 +223,13 @@ function HabitsCard() {
       percentage: total > 0 ? Math.round((completed / total) * 100) : 0,
     }
   }, [habits])
+
+  const handleToggle = (habitId: string, currentlyCompleted: boolean) => {
+    toggleHabit.mutate({
+      habitId,
+      isCompleted: !currentlyCompleted,
+    })
+  }
 
   if (isLoading) {
     return (
@@ -265,11 +274,13 @@ function HabitsCard() {
             {habits.slice(0, 8).map(habit => (
               <li
                 key={habit.id}
+                onClick={() => handleToggle(habit.id, habit.is_completed)}
                 className={clsx(
-                  'flex items-center justify-between p-2 rounded-lg transition-colors',
+                  'flex items-center justify-between p-2 rounded-lg transition-colors cursor-pointer hover:opacity-80',
                   habit.is_completed
                     ? 'bg-green-50 dark:bg-green-900/20'
-                    : 'bg-gray-50 dark:bg-gray-800/50'
+                    : 'bg-gray-50 dark:bg-gray-800/50',
+                  toggleHabit.isPending && 'opacity-50 pointer-events-none'
                 )}
               >
                 <div className="flex items-center gap-3">

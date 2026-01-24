@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import type {
@@ -387,4 +387,62 @@ export function useDashboardRealtime() {
       supabase.removeChannel(snapshotsChannel)
     }
   }, [queryClient])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Toggle Habit Completion
+// ─────────────────────────────────────────────────────────────
+
+export function useToggleHabit() {
+  const queryClient = useQueryClient()
+  const today = getTodayISO()
+
+  return useMutation({
+    mutationFn: async ({
+      habitId,
+      isCompleted,
+      value,
+    }: {
+      habitId: string
+      isCompleted: boolean
+      value?: number
+    }) => {
+      // Check if a log exists for today
+      const { data: existingLog, error: fetchError } = await supabase
+        .from('habit_logs')
+        .select('id')
+        .eq('habit_id', habitId)
+        .eq('date', today)
+        .maybeSingle()
+
+      if (fetchError) throw fetchError
+
+      if (existingLog) {
+        // Update existing log
+        const { error } = await supabase
+          .from('habit_logs')
+          .update({
+            is_completed: isCompleted,
+            value: value ?? null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingLog.id)
+
+        if (error) throw error
+      } else {
+        // Create new log
+        const { error } = await supabase.from('habit_logs').insert({
+          habit_id: habitId,
+          date: today,
+          is_completed: isCompleted,
+          value: value ?? null,
+        })
+
+        if (error) throw error
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['today-habits'] })
+    },
+  })
 }
