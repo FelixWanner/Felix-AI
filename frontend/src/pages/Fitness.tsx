@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
-import { useDashboardRealtime } from '../hooks/useDashboard'
 import FitnessHabitTracker from '../components/FitnessHabitTracker'
 import SupplementChecklist from '../components/SupplementChecklist'
 import {
@@ -63,10 +62,6 @@ interface CardioSession {
 
 export default function Fitness() {
   const { user } = useAuth()
-
-  // Enable realtime updates for cross-device sync
-  useDashboardRealtime()
-
   const [currentDate, setCurrentDate] = useState(new Date())
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -108,6 +103,34 @@ export default function Fitness() {
       loadData()
     }
   }, [user, currentDate])
+
+  // Realtime subscription for cross-device sync
+  useEffect(() => {
+    if (!user) return
+
+    const channel = supabase
+      .channel('fitness-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'body_tracking',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          // Only reload if the change is for the current date
+          if (payload.new && (payload.new as any).date === dateStr) {
+            loadData()
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user, dateStr])
 
   async function loadData() {
     if (!user) return

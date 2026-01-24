@@ -3,7 +3,6 @@ import { supabase } from '@/lib/supabase'
 import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 import SupplementPeptideLog from '../components/SupplementPeptideLog'
-import { useDashboardRealtime } from '@/hooks/useDashboard'
 import {
   BookOpen,
   Calendar,
@@ -103,9 +102,6 @@ interface JournalPrompts {
 }
 
 export default function Journal() {
-  // Enable realtime updates for cross-device sync
-  useDashboardRealtime()
-
   const [currentDate, setCurrentDate] = useState(new Date())
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -143,6 +139,42 @@ export default function Journal() {
   useEffect(() => {
     loadJournalData()
   }, [currentDate])
+
+  // Realtime subscription for cross-device sync
+  useEffect(() => {
+    const setupRealtime = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const channel = supabase
+        .channel('journal-realtime')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'daily_logs',
+            filter: `user_id=eq.${user.id}`,
+          },
+          (payload) => {
+            // Only reload if the change is for the current date
+            if (payload.new && (payload.new as any).date === dateStr) {
+              loadJournalData()
+            }
+          }
+        )
+        .subscribe()
+
+      return () => {
+        supabase.removeChannel(channel)
+      }
+    }
+
+    const cleanup = setupRealtime()
+    return () => {
+      cleanup.then(fn => fn?.())
+    }
+  }, [dateStr])
 
   async function loadJournalData() {
     try {

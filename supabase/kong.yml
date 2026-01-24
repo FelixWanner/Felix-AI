@@ -193,7 +193,10 @@ plugins:
   - name: cors
     config:
       origins:
-        - '*'
+        - https://dashboard.life-os.fwanner.de
+        - https://life-os.fwanner.de
+        - http://localhost:5173
+        - http://localhost:3000
       methods:
         - GET
         - POST
@@ -201,6 +204,7 @@ plugins:
         - PATCH
         - DELETE
         - OPTIONS
+        - HEAD
       headers:
         - Accept
         - Accept-Version
@@ -212,8 +216,12 @@ plugins:
         - X-Auth-Token
         - apikey
         - x-client-info
+        - Prefer
+        - Range
       exposed_headers:
         - X-Auth-Token
+        - Content-Range
       credentials: true
       max_age: 3600
+      preflight_continue: false
 

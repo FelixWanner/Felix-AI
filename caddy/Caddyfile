@@ -165,21 +165,33 @@ n8n.life-os.fwanner.de {
 # https://api.life-os.fwanner.de
 # ───────────────────────────────────────────────────────────────
 api.life-os.fwanner.de {
-	reverse_proxy supabase-kong:8000
-
-	# CORS Headers
-	header {
-		Access-Control-Allow-Origin *
-		Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info, x-supabase-api-version, content-profile, prefer, range"
-		Access-Control-Max-Age 86400
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		-Server
+	# Handle preflight OPTIONS requests first
+	@options method OPTIONS
+	handle @options {
+		header {
+			Access-Control-Allow-Origin "https://dashboard.life-os.fwanner.de"
+			Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD"
+			Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info, x-supabase-api-version, content-profile, accept-profile, prefer, range, Accept, X-Upsert"
+			Access-Control-Allow-Credentials "true"
+			Access-Control-Max-Age "86400"
+		}
+		respond 204
 	}
 
-	# Handle preflight requests
-	@options method OPTIONS
-	respond @options 204
+	# All other requests
+	handle {
+		reverse_proxy supabase-kong:8000
+
+		header {
+			Access-Control-Allow-Origin "https://dashboard.life-os.fwanner.de"
+			Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD"
+			Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info, x-supabase-api-version, content-profile, accept-profile, prefer, range, Accept, X-Upsert"
+			Access-Control-Allow-Credentials "true"
+			Access-Control-Expose-Headers "Content-Range, X-Total-Count"
+			Strict-Transport-Security "max-age=31536000; includeSubDomains"
+			-Server
+		}
+	}
 
 	log {
 		output file /data/logs/api.log
