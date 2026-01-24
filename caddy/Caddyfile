@@ -102,10 +102,10 @@ http://studio.localhost {
 # ═══════════════════════════════════════════════════════════════
 
 # ───────────────────────────────────────────────────────────────
-# Frontend (Main Domain)
-# https://life-os.fwanner.de
+# Frontend Dashboard
+# https://dashboard.life-os.fwanner.de
 # ───────────────────────────────────────────────────────────────
-life-os.fwanner.de {
+dashboard.life-os.fwanner.de {
 	reverse_proxy frontend:80
 
 	encode gzip zstd
@@ -123,6 +123,14 @@ life-os.fwanner.de {
 		output file /data/logs/frontend.log
 		format json
 	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# Main Domain Redirect
+# https://life-os.fwanner.de -> dashboard.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+life-os.fwanner.de {
+	redir https://dashboard.life-os.fwanner.de{uri} permanent
 }
 
 # ───────────────────────────────────────────────────────────────
