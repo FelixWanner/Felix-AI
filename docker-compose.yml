@@ -29,9 +29,7 @@ services:
   # FRONTEND - React Dashboard
   # ═══════════════════════════════════════════════════════════════
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: lifeos-frontend:latest
     container_name: lifeos-frontend
     restart: unless-stopped
     environment:

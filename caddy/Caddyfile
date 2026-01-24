@@ -74,7 +74,7 @@ http://api.localhost {
 	header {
 		Access-Control-Allow-Origin *
 		Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info"
+		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info, x-supabase-api-version, content-profile, prefer, range"
 		Access-Control-Max-Age 86400
 		-Server
 	}
@@ -171,7 +171,7 @@ api.life-os.fwanner.de {
 	header {
 		Access-Control-Allow-Origin *
 		Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info"
+		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info, x-supabase-api-version, content-profile, prefer, range"
 		Access-Control-Max-Age 86400
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
@@ -222,7 +222,7 @@ storage.life-os.fwanner.de {
 	header {
 		Access-Control-Allow-Origin *
 		Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
-		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info"
+		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info, x-supabase-api-version, content-profile, prefer, range"
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
 	}

@@ -259,7 +259,7 @@ export default function FireProgress() {
           <StatCard
             icon={BanknotesIcon}
             label="Safe Withdrawal (4%)"
-            value={formatCurrency(fire.monthlyPassiveIncome)}/Mo
+            value={`${formatCurrency(fire.monthlyPassiveIncome)}/Mo`}
             subValue={`${formatCompactCurrency(metrics?.safeWithdrawal || 0)}/Jahr`}
             color="text-blue-500"
           />
