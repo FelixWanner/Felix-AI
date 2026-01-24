@@ -1,0 +1,509 @@
+{
+  "name": "Process Meeting Minutes - Extract Action Items",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "process-meeting-minutes",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "process-meeting-minutes-webhook"
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Du bist ein Assistent, der Meeting-Protokolle analysiert und Action Items extrahiert. Analysiere das folgende Meeting-Protokoll und extrahiere alle Aufgaben, die erledigt werden müssen.\\n\\nFür jedes Action Item gib zurück:\\n- title: Kurze Beschreibung der Aufgabe (max 100 Zeichen)\\n- description: Detaillierte Beschreibung\\n- assigned_to: Name der zuständigen Person (falls erwähnt, sonst null)\\n- due_date: Fälligkeitsdatum im ISO-Format (falls erwähnt, sonst null)\\n- priority: 'high', 'medium', oder 'low' basierend auf Dringlichkeit\\n\\nErstelle außerdem eine kurze Zusammenfassung des Meetings (max 500 Zeichen).\\n\\nAntworte NUR mit gültigem JSON im folgenden Format:\\n{\\n  \\\"summary\\\": \\\"Kurze Meeting-Zusammenfassung...\\\",\\n  \\\"action_items\\\": [\\n    {\\n      \\\"title\\\": \\\"Aufgabentitel\\\",\\n      \\\"description\\\": \\\"Detaillierte Beschreibung\\\",\\n      \\\"assigned_to\\\": \\\"Person\\\" oder null,\\n      \\\"due_date\\\": \\\"2024-01-31\\\" oder null,\\n      \\\"priority\\\": \\\"high\\\"\\n    }\\n  ]\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Meeting: {{ $json.meeting_title }}\\nDatum: {{ $json.meeting_date }}\\nTeilnehmer: {{ $json.attendees ? (Array.isArray($json.attendees) ? $json.attendees.map(a => a.name || a).join(', ') : $json.attendees) : 'Nicht angegeben' }}\\n\\nProtokoll:\\n{{ $json.transcript.replace(/\\\"/g, '\\\\\\\"').replace(/\\n/g, '\\\\n') }}\"\n    }\n  ],\n  \"temperature\": 0.3,\n  \"max_tokens\": 2000,\n  \"response_format\": { \"type\": \"json_object\" }\n}",
+        "options": {}
+      },
+      "id": "openai-extract-actions",
+      "name": "OpenAI Extract Action Items",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "openai-api",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse OpenAI response\nconst aiResponse = $input.first().json;\nconst webhookData = $('Webhook Trigger').first().json;\n\nlet parsed = {\n  summary: '',\n  action_items: []\n};\n\ntry {\n  if (aiResponse.choices && aiResponse.choices[0]) {\n    const content = aiResponse.choices[0].message.content;\n    parsed = JSON.parse(content);\n  }\n} catch (e) {\n  console.error('Failed to parse AI response:', e);\n}\n\nreturn {\n  meeting_id: webhookData.meeting_id,\n  meeting_title: webhookData.meeting_title,\n  summary: parsed.summary || 'Keine Zusammenfassung verfügbar',\n  action_items: parsed.action_items || [],\n  user_id: webhookData.user_id\n};"
+      },
+      "id": "parse-ai-response",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-action-items",
+              "leftValue": "={{ $json.action_items.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-actions",
+      "name": "Has Action Items?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare action items for database insertion\nconst data = $input.first().json;\nconst items = [];\n\nfor (const item of data.action_items) {\n  items.push({\n    meeting_id: data.meeting_id,\n    meeting_title: data.meeting_title,\n    summary: data.summary,\n    user_id: data.user_id,\n    title: item.title,\n    description: item.description || '',\n    assigned_to: item.assigned_to || null,\n    due_date: item.due_date || null,\n    priority: item.priority || 'medium'\n  });\n}\n\nreturn items;"
+      },
+      "id": "prepare-items",
+      "name": "Prepare Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "inbox_items",
+          "mode": "list",
+          "cachedResultName": "inbox_items"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "title": "={{ $json.title }}",
+            "description": "={{ $json.description }}",
+            "source": "meeting",
+            "status": "pending",
+            "priority": "={{ $json.priority }}",
+            "due_date": "={{ $json.due_date }}",
+            "user_id": "={{ $json.user_id }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {
+          "returnData": true
+        }
+      },
+      "id": "insert-inbox-items",
+      "name": "Insert Inbox Items",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1340, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare meeting_action_items entries\nconst inbox = $input.all();\nconst preparedItems = $('Prepare Items').all();\n\nconst result = [];\n\nfor (let i = 0; i < inbox.length; i++) {\n  const inboxItem = inbox[i].json;\n  const prepItem = preparedItems[i].json;\n  \n  result.push({\n    meeting_id: prepItem.meeting_id,\n    inbox_item_id: inboxItem.id,\n    extracted_text: prepItem.title + (prepItem.description ? ': ' + prepItem.description : ''),\n    assigned_to: prepItem.assigned_to,\n    due_date: prepItem.due_date,\n    summary: prepItem.summary,\n    meeting_title: prepItem.meeting_title\n  });\n}\n\nreturn result;"
+      },
+      "id": "prepare-action-items",
+      "name": "Prepare Action Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "meeting_action_items",
+          "mode": "list",
+          "cachedResultName": "meeting_action_items"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "meeting_id": "={{ $json.meeting_id }}",
+            "inbox_item_id": "={{ $json.inbox_item_id }}",
+            "extracted_text": "={{ $json.extracted_text }}",
+            "assigned_to": "={{ $json.assigned_to }}",
+            "due_date": "={{ $json.due_date }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "insert-meeting-action-items",
+      "name": "Insert Meeting Action Items",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1780, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect results for update and response\nconst items = $input.all();\nconst first = items[0].json;\n\nreturn {\n  meeting_id: first.meeting_id,\n  summary: first.summary,\n  action_items_count: items.length,\n  action_items: items.map(i => ({\n    title: i.json.extracted_text?.split(':')[0] || 'Aufgabe',\n    assigned_to: i.json.assigned_to,\n    due_date: i.json.due_date\n  }))\n};"
+      },
+      "id": "collect-results",
+      "name": "Collect Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 200]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "meetings",
+          "mode": "list",
+          "cachedResultName": "meetings"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "summary": "={{ $json.summary }}"
+          },
+          "matchingColumns": ["id"],
+          "schema": []
+        },
+        "options": {
+          "outputColumns": ["id", "summary"]
+        }
+      },
+      "id": "update-meeting-summary",
+      "name": "Update Meeting Summary",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2220, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format success response with action items\nconst results = $('Collect Results').first().json;\n\nreturn {\n  success: true,\n  meeting_id: results.meeting_id,\n  summary: results.summary,\n  action_items: results.action_items,\n  action_items_count: results.action_items_count,\n  message: `${results.action_items_count} Action Items erfolgreich extrahiert und gespeichert.`\n};"
+      },
+      "id": "format-success-response",
+      "name": "Format Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2440, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format response when no action items found\nconst data = $input.first().json;\n\nreturn {\n  success: true,\n  meeting_id: data.meeting_id,\n  summary: data.summary,\n  action_items: [],\n  action_items_count: 0,\n  message: 'Keine Action Items im Protokoll gefunden.'\n};"
+      },
+      "id": "format-no-actions-response",
+      "name": "Format No Actions Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "meetings",
+          "mode": "list",
+          "cachedResultName": "meetings"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "summary": "={{ $json.summary }}"
+          },
+          "matchingColumns": ["id"],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "update-meeting-summary-no-items",
+      "name": "Update Summary (No Items)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1340, 400],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "merge-responses",
+      "name": "Merge Responses",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [2660, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": {{ $json.success }},\n  \"meeting_id\": {{ JSON.stringify($json.meeting_id) }},\n  \"summary\": {{ JSON.stringify($json.summary) }},\n  \"action_items\": {{ JSON.stringify($json.action_items) }},\n  \"action_items_count\": {{ $json.action_items_count }},\n  \"message\": {{ JSON.stringify($json.message) }}\n}",
+        "options": {}
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2880, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Extract Action Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Extract Action Items": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Has Action Items?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Action Items?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format No Actions Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Items": {
+      "main": [
+        [
+          {
+            "node": "Insert Inbox Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Inbox Items": {
+      "main": [
+        [
+          {
+            "node": "Prepare Action Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Action Items": {
+      "main": [
+        [
+          {
+            "node": "Insert Meeting Action Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Meeting Action Items": {
+      "main": [
+        [
+          {
+            "node": "Collect Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Results": {
+      "main": [
+        [
+          {
+            "node": "Update Meeting Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Meeting Summary": {
+      "main": [
+        [
+          {
+            "node": "Format Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Success Response": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format No Actions Response": {
+      "main": [
+        [
+          {
+            "node": "Update Summary (No Items)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Summary (No Items)": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Responses": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "life-os"
+  },
+  "tags": [
+    {
+      "name": "productivity",
+      "id": "productivity-tag"
+    },
+    {
+      "name": "meetings",
+      "id": "meetings-tag"
+    }
+  ],
+  "pinData": {},
+  "staticData": null,
+  "triggerCount": 0
+}

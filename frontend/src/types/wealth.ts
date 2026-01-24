@@ -350,3 +350,292 @@ export interface PositionFilters {
   asset_type?: AssetType
   min_value?: number
 }
+
+// ─────────────────────────────────────────────────────────────
+// Real Estate Dashboard Types
+// ─────────────────────────────────────────────────────────────
+
+// Base Types (new tables)
+export type PropertyOperatingData = Tables<'property_operating_data'>
+export type PropertyOperatingDataInsert = InsertTables<'property_operating_data'>
+export type PropertyOperatingDataUpdate = UpdateTables<'property_operating_data'>
+
+export type PropertyTechnicalStatus = Tables<'property_technical_status'>
+export type PropertyTechnicalStatusInsert = InsertTables<'property_technical_status'>
+export type PropertyTechnicalStatusUpdate = UpdateTables<'property_technical_status'>
+
+export type TenantChange = Tables<'tenant_changes'>
+export type TenantChangeInsert = InsertTables<'tenant_changes'>
+
+export type AlertThresholds = Tables<'alert_thresholds'>
+export type AlertThresholdsInsert = InsertTables<'alert_thresholds'>
+export type AlertThresholdsUpdate = UpdateTables<'alert_thresholds'>
+
+export type PortfolioSnapshot = Tables<'portfolio_snapshots'>
+export type PortfolioSnapshotInsert = InsertTables<'portfolio_snapshots'>
+
+// ─────────────────────────────────────────────────────────────
+// Traffic Light Status (Ampel-System)
+// ─────────────────────────────────────────────────────────────
+
+export const TrafficLightStatus = {
+  GREEN: 'green',
+  YELLOW: 'yellow',
+  RED: 'red',
+} as const
+
+export type TrafficLightStatusType = (typeof TrafficLightStatus)[keyof typeof TrafficLightStatus]
+
+export const TenantChangeTypes = {
+  MOVE_IN: 'move_in',
+  MOVE_OUT: 'move_out',
+  RENT_INCREASE: 'rent_increase',
+  RENT_DECREASE: 'rent_decrease',
+} as const
+
+export type TenantChangeType = (typeof TenantChangeTypes)[keyof typeof TenantChangeTypes]
+
+// ─────────────────────────────────────────────────────────────
+// Property KPIs (Per-Property Computed Metrics)
+// ─────────────────────────────────────────────────────────────
+
+export interface PropertyKPIs {
+  propertyId: string
+  propertyName: string
+  propertyAddress: string | null
+
+  // Rental Income
+  actualColdRent: number
+  targetColdRent: number
+  vacancyDays: number
+  rentArrears: number
+
+  // Operating Costs
+  allocableCosts: number
+  nonAllocableCosts: number
+
+  // Maintenance & CapEx
+  maintenanceActual: number
+  maintenancePlanned: number
+  capexActual: number
+  capexPlanned: number
+
+  // Financing
+  loanBalance: number
+  monthlyDebtService: number
+  monthlyInterest: number
+  monthlyPrincipal: number
+  interestRate: number
+  interestFixedUntil: string | null
+  monthsUntilInterestExpiry: number | null
+  specialRepaymentAllowed: number
+
+  // Property Info
+  totalSqm: number
+  unitCount: number
+  occupiedUnits: number
+  vacantUnits: number
+  lastTenantChange: string | null
+
+  // Technical Status (Traffic Lights)
+  heatingStatus: TrafficLightStatusType
+  roofStatus: TrafficLightStatusType
+  moistureStatus: TrafficLightStatusType
+  electricalStatus: TrafficLightStatusType
+  plumbingStatus: TrafficLightStatusType
+  facadeStatus: TrafficLightStatusType
+  windowsStatus: TrafficLightStatusType
+  worstTechnicalStatus: TrafficLightStatusType
+
+  // Valuation
+  currentMarketValue: number
+  conservativeMarketValue: number
+  equity: number
+  ltv: number
+
+  // Computed Metrics
+  noi: number // Net Operating Income = actualColdRent - nonAllocableCosts
+  netCashflow: number // NOI - debtService
+  netCashflowWithCapex: number // netCashflow - capexActual
+  dscr: number // NOI / debtService
+  grossYield: number // (actualColdRent * 12) / currentMarketValue * 100
+  netYield: number // (noi * 12) / currentMarketValue * 100
+  rentPerSqm: number
+  targetRentPerSqm: number
+  costsPerSqm: number
+  capexPerSqm: number
+  vacancyRate: number // vacantUnits / unitCount * 100
+  arrearsRate: number // rentArrears / actualColdRent * 100
+  capexBudgetUsed: number // capexActual / capexPlanned * 100
+}
+
+// ─────────────────────────────────────────────────────────────
+// Portfolio KPIs (Aggregated Metrics)
+// ─────────────────────────────────────────────────────────────
+
+export interface PortfolioKPIs {
+  // Core Values
+  totalPropertyValue: number
+  totalConservativeValue: number
+  totalLoanBalance: number
+  totalEquity: number
+  portfolioLTV: number
+
+  // Income & Cashflow (Monthly)
+  totalActualRent: number
+  totalTargetRent: number
+  totalAllocableCosts: number
+  totalNonAllocableCosts: number
+  totalDebtService: number
+  totalNOI: number
+  netCashflow: number
+  netCashflowWithCapex: number
+
+  // Ratios
+  dscr: number
+  vacancyRateUnits: number
+  vacancyRateSqm: number
+  arrearsRate: number
+  rentLossRate: number // (targetRent - actualRent) / targetRent * 100
+
+  // Units & Area
+  totalUnits: number
+  occupiedUnits: number
+  vacantUnits: number
+  totalSqm: number
+  occupiedSqm: number
+
+  // CapEx
+  totalCapexActual: number
+  totalCapexPlanned: number
+  capexPerSqmAnnual: number
+  capexBudgetUsedPercent: number
+
+  // Cash-on-Cash (requires equity invested data)
+  totalEquityInvested: number
+  annualNetCashflow: number
+  cashOnCash: number
+
+  // Risk Metrics
+  loansExpiringWithin12Months: number
+  loansExpiringWithin24Months: number
+  refinancingRiskAmount: number
+  avgWeightedInterestRate: number
+  propertiesWithTechnicalIssues: number
+}
+
+// ─────────────────────────────────────────────────────────────
+// Real Estate Alerts
+// ─────────────────────────────────────────────────────────────
+
+export type RealEstateAlertType =
+  | 'dscr_low'
+  | 'interest_expiring'
+  | 'high_ltv_refinancing'
+  | 'rent_arrears'
+  | 'vacancy_long'
+  | 'capex_budget_high'
+  | 'technical_issue'
+
+export type AlertSeverity = 'info' | 'warning' | 'critical'
+
+export interface RealEstateAlert {
+  id: string
+  type: RealEstateAlertType
+  severity: AlertSeverity
+  title: string
+  message: string
+  propertyId?: string
+  propertyName?: string
+  loanId?: string
+  value?: number
+  threshold?: number
+  actionUrl?: string
+  createdAt: string
+}
+
+// ─────────────────────────────────────────────────────────────
+// Chart Data Types
+// ─────────────────────────────────────────────────────────────
+
+export interface TrendDataPoint {
+  month: string // YYYY-MM
+  monthLabel: string // e.g., "Jan 24"
+  netCashflow: number
+  vacancyDays: number
+  rentArrears: number
+  capex: number
+  noi: number
+}
+
+export interface WaterfallDataPoint {
+  name: string
+  value: number
+  cumulative: number
+  type: 'start' | 'increase' | 'decrease' | 'subtotal' | 'total'
+  fill: string
+}
+
+export interface MaturityWallDataPoint {
+  year: number
+  expiringAmount: number
+  loanCount: number
+  avgLTV: number
+}
+
+export interface RiskBoardProperty {
+  propertyId: string
+  propertyName: string
+  propertyAddress: string | null
+  riskScore: number // 0-100, higher = riskier
+  interestExpiringMonths: number | null
+  dscr: number
+  arrears: number
+  arrearsMonths: number // arrears as fraction of monthly rent
+  ltv: number
+  technicalWorstStatus: TrafficLightStatusType
+  alerts: RealEstateAlert[]
+}
+
+export interface BenchmarkDataPoint {
+  propertyId: string
+  propertyName: string
+  actualRentPerSqm: number
+  targetRentPerSqm: number
+  costsPerSqm: number
+  capexPerSqm: number
+  noiPerSqm: number
+}
+
+// ─────────────────────────────────────────────────────────────
+// Default Alert Thresholds
+// ─────────────────────────────────────────────────────────────
+
+export const DEFAULT_ALERT_THRESHOLDS = {
+  dscr_warning: 1.2,
+  dscr_critical: 1.1,
+  interest_expiry_warning_months: 24,
+  interest_expiry_critical_months: 18,
+  ltv_high_threshold: 80,
+  arrears_warning_months: 0.5,
+  arrears_critical_months: 1.0,
+  vacancy_warning_days: 30,
+  vacancy_critical_days: 60,
+  capex_warning_percent: 70,
+  capex_critical_percent: 90,
+} as const
+
+// ─────────────────────────────────────────────────────────────
+// Real Estate Dashboard Data
+// ─────────────────────────────────────────────────────────────
+
+export interface RealEstateDashboardData {
+  portfolioKPIs: PortfolioKPIs
+  propertyKPIs: PropertyKPIs[]
+  alerts: RealEstateAlert[]
+  trendData: TrendDataPoint[]
+  waterfallData: WaterfallDataPoint[]
+  maturityWall: MaturityWallDataPoint[]
+  riskBoard: RiskBoardProperty[]
+  benchmarks: BenchmarkDataPoint[]
+}

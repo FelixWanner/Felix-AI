@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════════
 # Kong Configuration for Supabase
 # ═══════════════════════════════════════════════════════════════
-_format_version: "2.1"
+_format_version: \"2.1\"
 _transform: true
 
 # ───────────────────────────────────────────────────────────────
@@ -193,7 +193,7 @@ plugins:
   - name: cors
     config:
       origins:
-        - "*"
+        - '*'
       methods:
         - GET
         - POST
@@ -217,8 +217,3 @@ plugins:
       credentials: true
       max_age: 3600
 
-  - name: request-transformer
-    config:
-      add:
-        headers:
-          - "X-Request-Id:$(request_id)"

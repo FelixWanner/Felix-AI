@@ -1316,6 +1316,59 @@ export interface Database {
           created_at?: string
         }
       }
+      solar_panels: {
+        Row: {
+          id: string
+          user_id: string
+          name: string
+          location: string | null
+          installed_date: string | null
+          capacity_kwp: number
+          annual_yield_kwh: number | null
+          feed_in_tariff: number | null
+          installation_cost: number | null
+          current_value: number | null
+          status: string
+          property_id: string | null
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          name: string
+          location?: string | null
+          installed_date?: string | null
+          capacity_kwp: number
+          annual_yield_kwh?: number | null
+          feed_in_tariff?: number | null
+          installation_cost?: number | null
+          current_value?: number | null
+          status?: string
+          property_id?: string | null
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          name?: string
+          location?: string | null
+          installed_date?: string | null
+          capacity_kwp?: number
+          annual_yield_kwh?: number | null
+          feed_in_tariff?: number | null
+          installation_cost?: number | null
+          current_value?: number | null
+          status?: string
+          property_id?: string | null
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
 
       // ─────────────────────────────────────────────────────────────
       // Productivity Module (00003_productivity_module)

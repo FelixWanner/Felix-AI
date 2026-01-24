@@ -29,6 +29,7 @@ import {
   usePropertyTickets,
   usePropertyDocuments,
 } from '@/hooks/useProperties'
+import LoanManager from '@/components/LoanManager'
 
 // ─────────────────────────────────────────────────────────────
 // Currency Formatter
@@ -597,6 +598,13 @@ export default function PropertyDetail() {
               </div>
             </div>
           )}
+
+          {/* Loans */}
+          <div className="card">
+            <div className="card-body">
+              <LoanManager assetId={propertyId!} assetType="property" />
+            </div>
+          </div>
 
           {/* Tickets/Tasks */}
           <div className="card">

@@ -41,7 +41,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Transform BHB accounts to Supabase format\nconst accounts = $input.all();\nconst transformed = [];\n\nfor (const item of accounts) {\n  const data = item.json.data || [item.json];\n  \n  for (const account of data) {\n    transformed.push({\n      json: {\n        external_id: `bhb_${account.id}`,\n        name: account.name,\n        account_type: mapAccountType(account.type),\n        bank_name: account.bank_name || 'Buchhaltungsbutler',\n        iban: account.iban || null,\n        balance: parseFloat(account.balance) || 0,\n        currency: account.currency || 'EUR',\n        last_sync_at: new Date().toISOString(),\n        metadata: {\n          bhb_id: account.id,\n          bhb_type: account.type,\n          original_data: account\n        }\n      }\n    });\n  }\n}\n\nfunction mapAccountType(bhbType) {\n  const mapping = {\n    'bank': 'checking',\n    'cash': 'cash',\n    'credit_card': 'credit_card',\n    'savings': 'savings',\n    'loan': 'loan'\n  };\n  return mapping[bhbType] || 'other';\n}\n\nreturn transformed;"
+        "jsCode": "// Transform BHB accounts to Supabase accounts table format\nconst accounts = $input.all();\nconst transformed = [];\n\nfor (const item of accounts) {\n  const data = item.json.data || [item.json];\n  \n  for (const account of data) {\n    transformed.push({\n      json: {\n        bhb_account_id: account.id.toString(),\n        name: account.name,\n        account_type: mapAccountType(account.type),\n        iban: account.iban || null,\n        current_balance: parseFloat(account.balance) || 0,\n        is_active: true,\n        last_synced_at: new Date().toISOString(),\n        notes: `BHB Type: ${account.type}, Currency: ${account.currency || 'EUR'}`\n      }\n    });\n  }\n}\n\nfunction mapAccountType(bhbType) {\n  const mapping = {\n    'bank': 'checking',\n    'cash': 'cash',\n    'credit_card': 'credit_card',\n    'savings': 'savings',\n    'loan': 'loan'\n  };\n  return mapping[bhbType] || 'checking';\n}\n\nreturn transformed;"
       },
       "id": "transform-data",
       "name": "Transform Data",
@@ -53,9 +53,9 @@
       "parameters": {
         "operation": "upsert",
         "schema": "public",
-        "table": "bank_accounts",
-        "columns": "external_id, name, account_type, bank_name, iban, balance, currency, last_sync_at, metadata",
-        "conflictColumns": "external_id",
+        "table": "accounts",
+        "columns": "bhb_account_id, name, account_type, iban, current_balance, is_active, last_synced_at",
+        "conflictColumns": "bhb_account_id",
         "options": {}
       },
       "id": "supabase-upsert",
@@ -72,41 +72,34 @@
     },
     {
       "parameters": {
-        "operation": "update",
+        "jsCode": "// Update sync status\nconst itemCount = $input.all().length;\n\nreturn [{\n  json: {\n    source: 'buchhaltungsbutler',\n    last_sync_at: new Date().toISOString(),\n    last_sync_status: 'success',\n    items_synced: itemCount\n  }\n}];"
+      },
+      "id": "prepare-status",
+      "name": "Prepare Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
         "schema": "public",
         "table": "sync_status",
-        "columns": "last_sync_at, last_sync_status, items_synced",
-        "filters": {
-          "conditions": [
-            {
-              "keyName": "source",
-              "keyValue": "buchhaltungsbutler"
-            }
-          ]
-        },
+        "columns": "source, last_sync_at, last_sync_status, items_synced",
+        "conflictColumns": "source",
         "options": {}
       },
       "id": "update-sync-status",
       "name": "Update Sync Status",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
-      "position": [1120, 300],
+      "position": [1340, 300],
       "credentials": {
         "supabaseApi": {
           "id": "supabase-creds",
           "name": "Supabase"
         }
       }
-    },
-    {
-      "parameters": {
-        "jsCode": "// Prepare sync status update\nconst itemCount = $input.all().length;\n\nreturn [{\n  json: {\n    last_sync_at: new Date().toISOString(),\n    last_sync_status: 'success',\n    items_synced: itemCount\n  }\n}];"
-      },
-      "id": "prepare-status",
-      "name": "Prepare Status",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1120, 480]
     },
     {
       "parameters": {
@@ -158,6 +151,15 @@
         [
           {
             "node": "Prepare Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "Error Handler",
             "type": "main",
             "index": 0
           }

@@ -2,154 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Base Styles */
 @layer base {
   html {
     @apply scroll-smooth;
   }
 
   body {
-    @apply antialiased text-gray-900 dark:text-gray-100;
-  }
-
-  /* Custom Scrollbar */
-  ::-webkit-scrollbar {
-    @apply w-2;
-  }
-
-  ::-webkit-scrollbar-track {
-    @apply bg-gray-100 dark:bg-gray-800;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    @apply bg-gray-300 dark:bg-gray-600 rounded-full;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-gray-400 dark:bg-gray-500;
+    @apply antialiased text-gray-900 bg-gray-50 dark:text-gray-100 dark:bg-gray-900;
   }
 }
 
-/* Component Styles */
 @layer components {
-  /* Card */
   .card {
-    @apply bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700;
+    @apply bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6;
   }
 
-  .card-header {
-    @apply px-6 py-4 border-b border-gray-200 dark:border-gray-700;
-  }
-
-  .card-body {
-    @apply px-6 py-4;
-  }
-
-  /* Button Variants */
   .btn {
-    @apply inline-flex items-center justify-center px-4 py-2 rounded-lg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center px-4 py-2 rounded-lg font-medium transition-colors;
   }
 
   .btn-primary {
-    @apply btn bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500;
+    @apply btn bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600;
   }
 
   .btn-secondary {
-    @apply btn bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 focus:ring-gray-500;
-  }
-
-  .btn-outline {
-    @apply btn border border-gray-300 dark:border-gray-600 bg-transparent hover:bg-gray-50 dark:hover:bg-gray-800 focus:ring-gray-500;
-  }
-
-  .btn-danger {
-    @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
-  }
-
-  .btn-sm {
-    @apply px-3 py-1.5 text-sm;
-  }
-
-  .btn-lg {
-    @apply px-6 py-3 text-lg;
-  }
-
-  /* Input */
-  .input {
-    @apply w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors;
-  }
-
-  /* Badge */
-  .badge {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
-  }
-
-  .badge-success {
-    @apply badge bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400;
-  }
-
-  .badge-warning {
-    @apply badge bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400;
-  }
-
-  .badge-danger {
-    @apply badge bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400;
-  }
-
-  .badge-info {
-    @apply badge bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400;
-  }
-
-  /* Stat Card */
-  .stat-card {
-    @apply card p-6;
-  }
-
-  .stat-value {
-    @apply text-3xl font-bold text-gray-900 dark:text-white;
-  }
-
-  .stat-label {
-    @apply text-sm text-gray-500 dark:text-gray-400;
-  }
-
-  .stat-change {
-    @apply text-sm font-medium;
-  }
-
-  .stat-change-positive {
-    @apply stat-change text-green-600 dark:text-green-400;
-  }
-
-  .stat-change-negative {
-    @apply stat-change text-red-600 dark:text-red-400;
-  }
-
-  /* Module Colors */
-  .module-wealth {
-    @apply text-wealth dark:text-wealth-light;
-  }
-
-  .module-productivity {
-    @apply text-productivity dark:text-productivity-light;
-  }
-
-  .module-health {
-    @apply text-health dark:text-health-light;
-  }
-
-  .module-goals {
-    @apply text-goals dark:text-goals-light;
-  }
-}
-
-/* Utility Styles */
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
-
-  .animate-in {
-    animation: fadeIn 0.2s ease-out;
+    @apply btn bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600;
   }
 }

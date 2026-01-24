@@ -6,6 +6,11 @@ import Wealth from './pages/Wealth'
 import Productivity from './pages/Productivity'
 import Health from './pages/Health'
 import Goals from './pages/Goals'
+import Journal from './pages/Journal'
+import Fitness from './pages/Fitness'
+import Training from './pages/Training'
+import WeeklyUpdate from './pages/WeeklyUpdate'
+import FitnessStats from './pages/FitnessStats'
 import Login from './pages/Login'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -41,6 +46,11 @@ function App() {
                 <Route path="/productivity/*" element={<Productivity />} />
                 <Route path="/health/*" element={<Health />} />
                 <Route path="/goals/*" element={<Goals />} />
+                <Route path="/journal/*" element={<Journal />} />
+                <Route path="/fitness/*" element={<Fitness />} />
+                <Route path="/training/*" element={<Training />} />
+                <Route path="/weekly-update/*" element={<WeeklyUpdate />} />
+                <Route path="/fitness-stats/*" element={<FitnessStats />} />
               </Routes>
             </Layout>
           </ProtectedRoute>
