@@ -245,33 +245,19 @@ export default function Journal() {
         what_went_well: wasWarGut.trim() || null,
       }
 
-      if (dailyLog?.id) {
-        // Update existing
-        const { error } = await supabase
-          .from('daily_logs')
-          .update(logData)
-          .eq('id', dailyLog.id)
+      // Use upsert to handle both insert and update
+      const { data, error } = await supabase
+        .from('daily_logs')
+        .upsert(logData, { onConflict: 'user_id,date' })
+        .select()
+        .single()
 
-        if (error) {
-          console.error('Error updating daily log:', error)
-          alert('Fehler beim Speichern: ' + error.message)
-          throw error
-        }
-      } else {
-        // Insert new
-        const { data, error } = await supabase
-          .from('daily_logs')
-          .insert([logData])
-          .select()
-          .single()
-
-        if (error) {
-          console.error('Error creating daily log:', error)
-          alert('Fehler beim Speichern: ' + error.message)
-          throw error
-        }
-        setDailyLog(data)
+      if (error) {
+        console.error('Error saving daily log:', error)
+        alert('Fehler beim Speichern: ' + error.message)
+        throw error
       }
+      setDailyLog(data)
 
       alert('Erfolgreich gespeichert!')
 
