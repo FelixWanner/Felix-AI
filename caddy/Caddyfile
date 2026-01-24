@@ -188,10 +188,15 @@ api.life-os.fwanner.de {
 }
 
 # ───────────────────────────────────────────────────────────────
-# Supabase Studio (Admin Dashboard)
+# Supabase Studio (Admin Dashboard) - PROTECTED
 # https://studio.life-os.fwanner.de
 # ───────────────────────────────────────────────────────────────
 studio.life-os.fwanner.de {
+	# Basic Auth Protection
+	basicauth {
+		admin $2a$14$kjKdoCF2i16K8xPpQTv4q.gG6/ue.MSJUJJ5oGwXqtMOapqox5q46
+	}
+
 	reverse_proxy supabase-studio:3000
 
 	header {
