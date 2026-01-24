@@ -315,6 +315,7 @@ export function useDailyLog(date?: string) {
 
 export function useDashboardRealtime() {
   const queryClient = useQueryClient()
+  const today = getTodayISO()
 
   useEffect(() => {
     // Subscribe to habit_logs changes
@@ -379,12 +380,68 @@ export function useDashboardRealtime() {
       )
       .subscribe()
 
+    // Subscribe to body_tracking changes
+    const bodyTrackingChannel = supabase
+      .channel('body-tracking-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'body_tracking' },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['body-tracking'] })
+          queryClient.invalidateQueries({ queryKey: ['fitness-data'] })
+        }
+      )
+      .subscribe()
+
+    // Subscribe to daily_supplement_tracking changes
+    const supplementChannel = supabase
+      .channel('supplement-tracking-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'daily_supplement_tracking' },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['supplement-tracking'] })
+          queryClient.invalidateQueries({ queryKey: ['fitness-data'] })
+        }
+      )
+      .subscribe()
+
+    // Subscribe to daily_logs changes
+    const dailyLogsChannel = supabase
+      .channel('daily-logs-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'daily_logs' },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['daily-log'] })
+          queryClient.invalidateQueries({ queryKey: ['journal-data'] })
+        }
+      )
+      .subscribe()
+
+    // Subscribe to supplement_peptide_log changes
+    const peptideChannel = supabase
+      .channel('peptide-log-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'supplement_peptide_log' },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['peptide-log'] })
+          queryClient.invalidateQueries({ queryKey: ['journal-data'] })
+        }
+      )
+      .subscribe()
+
     return () => {
       supabase.removeChannel(habitLogsChannel)
       supabase.removeChannel(insightsChannel)
       supabase.removeChannel(inboxChannel)
       supabase.removeChannel(meetingsChannel)
       supabase.removeChannel(snapshotsChannel)
+      supabase.removeChannel(bodyTrackingChannel)
+      supabase.removeChannel(supplementChannel)
+      supabase.removeChannel(dailyLogsChannel)
+      supabase.removeChannel(peptideChannel)
     }
-  }, [queryClient])
+  }, [queryClient, today])
 }

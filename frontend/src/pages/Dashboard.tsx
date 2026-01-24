@@ -8,6 +8,7 @@ import Modal from '@/components/Modal'
 import GoalForm from '@/components/GoalForm'
 import MeetingActionItems from '@/components/MeetingActionItems'
 import AIChatPanel from '@/components/AIChatPanel'
+import { useDashboardRealtime } from '@/hooks/useDashboard'
 
 // Real Estate Components
 import PortfolioKPICards, { PortfolioSummaryStats } from '@/components/realestate/PortfolioKPICards'
@@ -29,6 +30,9 @@ type Task = Tables<'inbox_items'>
 type Goal = Tables<'goals'>
 
 export default function Dashboard() {
+  // Enable realtime updates
+  useDashboardRealtime()
+
   const [tasks, setTasks] = useState<Task[]>([])
   const [goals, setGoals] = useState<Goal[]>([])
   const [emails, setEmails] = useState<Task[]>([])

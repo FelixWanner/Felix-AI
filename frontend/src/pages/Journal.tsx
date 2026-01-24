@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 import SupplementPeptideLog from '../components/SupplementPeptideLog'
+import { useDashboardRealtime } from '@/hooks/useDashboard'
 import {
   BookOpen,
   Calendar,
@@ -102,6 +103,9 @@ interface JournalPrompts {
 }
 
 export default function Journal() {
+  // Enable realtime updates for cross-device sync
+  useDashboardRealtime()
+
   const [currentDate, setCurrentDate] = useState(new Date())
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)

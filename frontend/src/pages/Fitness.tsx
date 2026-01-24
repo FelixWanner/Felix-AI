@@ -3,6 +3,7 @@ import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import { useDashboardRealtime } from '../hooks/useDashboard'
 import FitnessHabitTracker from '../components/FitnessHabitTracker'
 import SupplementChecklist from '../components/SupplementChecklist'
 import {
@@ -62,6 +63,10 @@ interface CardioSession {
 
 export default function Fitness() {
   const { user } = useAuth()
+
+  // Enable realtime updates for cross-device sync
+  useDashboardRealtime()
+
   const [currentDate, setCurrentDate] = useState(new Date())
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -195,23 +200,41 @@ export default function Fitness() {
     setSaving(true)
 
     try {
-      // Save Body Tracking
-      const bodyData: BodyTracking = {
+      // Save Body Tracking - only include non-null values to avoid overwriting
+      const bodyData: Partial<BodyTracking> = {
         user_id: user.id,
         date: dateStr,
-        weight_kg: weightKg,
-        waist_cm: waistCm,
-        blood_pressure_sys: bpSys,
-        blood_pressure_dia: bpDia,
-        resting_heart_rate: restingHr,
-        sleep_score: sleepScore,
-        body_battery: bodyBattery,
-        notes: bodyNotes
       }
+      // Only add fields that have actual values
+      if (weightKg !== null) bodyData.weight_kg = weightKg
+      if (waistCm !== null) bodyData.waist_cm = waistCm
+      if (bpSys !== null) bodyData.blood_pressure_sys = bpSys
+      if (bpDia !== null) bodyData.blood_pressure_dia = bpDia
+      if (restingHr !== null) bodyData.resting_heart_rate = restingHr
+      if (sleepScore !== null) bodyData.sleep_score = sleepScore
+      if (bodyBattery !== null) bodyData.body_battery = bodyBattery
+      if (bodyNotes) bodyData.notes = bodyNotes
 
-      await supabase
+      // Check if record exists
+      const { data: existing } = await supabase
         .from('body_tracking')
-        .upsert(bodyData, { onConflict: 'user_id,date' })
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('date', dateStr)
+        .single()
+
+      if (existing) {
+        // Update only the fields we have
+        await supabase
+          .from('body_tracking')
+          .update(bodyData)
+          .eq('id', existing.id)
+      } else {
+        // Insert new record
+        await supabase
+          .from('body_tracking')
+          .insert(bodyData as BodyTracking)
+      }
 
       // Save Nutrition Compliance
       const nutritionData: NutritionCompliance = {
