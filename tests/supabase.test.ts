@@ -43,10 +43,10 @@ let anonClient: SupabaseClient;
 let serviceClient: SupabaseClient;
 let authenticatedClient: SupabaseClient;
 
-// Test User Credentials
+// Test User Credentials (loaded from environment variables for security)
 const TEST_USER = {
-  email: 'test@life-os.local',
-  password: 'test-password-123!',
+  email: process.env.TEST_USER_EMAIL || 'test@life-os.local',
+  password: process.env.TEST_USER_PASSWORD || '',  // SECURITY: Must be set via environment variable
 };
 
 let testUserId: string | null = null;

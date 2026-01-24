@@ -70,11 +70,12 @@ http://n8n.localhost {
 http://api.localhost {
 	reverse_proxy supabase-kong:8000
 
-	# CORS Headers
+	# CORS Headers (restricted to local development origins)
 	header {
-		Access-Control-Allow-Origin *
+		Access-Control-Allow-Origin "http://localhost:5173"
 		Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
 		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info"
+		Access-Control-Allow-Credentials "true"
 		Access-Control-Max-Age 86400
 		-Server
 	}
@@ -167,13 +168,16 @@ n8n.life-os.fwanner.de {
 api.life-os.fwanner.de {
 	reverse_proxy supabase-kong:8000
 
-	# CORS Headers
+	# CORS Headers (SECURITY: Restricted to allowed origins only)
 	header {
-		Access-Control-Allow-Origin *
+		Access-Control-Allow-Origin "https://dashboard.life-os.fwanner.de"
 		Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
 		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info"
+		Access-Control-Allow-Credentials "true"
 		Access-Control-Max-Age 86400
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
 		-Server
 	}
 
@@ -219,11 +223,14 @@ storage.life-os.fwanner.de {
 		max_size 100MB
 	}
 
+	# CORS Headers (SECURITY: Restricted to allowed origins only)
 	header {
-		Access-Control-Allow-Origin *
+		Access-Control-Allow-Origin "https://dashboard.life-os.fwanner.de"
 		Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
 		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info"
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Access-Control-Allow-Credentials "true"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
 		-Server
 	}
 

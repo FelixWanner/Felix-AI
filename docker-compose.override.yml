@@ -3,6 +3,11 @@
 # ═══════════════════════════════════════════════════════════════
 # Diese Datei wird automatisch mit docker-compose.yml gemergt.
 # Enthält lokale Entwicklungs-Overrides.
+#
+# ⚠️  SECURITY WARNING ⚠️
+# This file exposes ports for local development ONLY!
+# NEVER use this file in production - it exposes the database directly!
+# For production, use: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 services:
   # ─────────────────────────────────────────────────────────────

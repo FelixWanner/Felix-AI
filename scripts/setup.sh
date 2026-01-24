@@ -51,8 +51,9 @@ generate_jwt() {
     # Header: {"alg":"HS256","typ":"JWT"}
     local header=$(echo -n '{"alg":"HS256","typ":"JWT"}' | base64 | tr -d '=' | tr '/+' '_-' | tr -d '\n')
 
-    # Payload with role and long expiry (2033)
-    local payload=$(echo -n "{\"iss\":\"supabase\",\"role\":\"$role\",\"iat\":$(date +%s),\"exp\":1999999999}" | base64 | tr -d '=' | tr '/+' '_-' | tr -d '\n')
+    # Payload with role and 7 day expiry (SECURITY: Short expiry for better security)
+    local exp_time=$(($(date +%s) + 604800))  # 7 days = 604800 seconds
+    local payload=$(echo -n "{\"iss\":\"supabase\",\"role\":\"$role\",\"iat\":$(date +%s),\"exp\":$exp_time}" | base64 | tr -d '=' | tr '/+' '_-' | tr -d '\n')
 
     # Signature
     local signature=$(echo -n "${header}.${payload}" | openssl dgst -sha256 -hmac "$jwt_secret" -binary | base64 | tr -d '=' | tr '/+' '_-' | tr -d '\n')
@@ -204,7 +205,7 @@ const payload = {
     role: role,
     iss: 'supabase',
     iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + (10 * 365 * 24 * 60 * 60) // 10 years
+    exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60) // 7 days (SECURITY: Short expiry)
 };
 
 console.log(createJWT(payload, secret));
@@ -239,7 +240,7 @@ payload = base64url_encode(json.dumps({
     "role": "anon",
     "iss": "supabase",
     "iat": int(time.time()),
-    "exp": int(time.time()) + 315360000
+    "exp": int(time.time()) + 604800  # 7 days (SECURITY: Short expiry)
 }).encode())
 sig = base64url_encode(hmac.new(secret.encode(), f"{header}.{payload}".encode(), hashlib.sha256).digest())
 print(f"{header}.{payload}.{sig}")
@@ -257,7 +258,7 @@ payload = base64url_encode(json.dumps({
     "role": "service_role",
     "iss": "supabase",
     "iat": int(time.time()),
-    "exp": int(time.time()) + 315360000
+    "exp": int(time.time()) + 604800  # 7 days (SECURITY: Short expiry)
 }).encode())
 sig = base64url_encode(hmac.new(secret.encode(), f"{header}.{payload}".encode(), hashlib.sha256).digest())
 print(f"{header}.{payload}.{sig}")

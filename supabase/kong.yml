@@ -72,7 +72,7 @@ services:
       - name: cors
       - name: key-auth
         config:
-          hide_credentials: false
+          hide_credentials: true
       - name: acl
         config:
           hide_groups_header: true
@@ -116,7 +116,7 @@ services:
       - name: cors
       - name: key-auth
         config:
-          hide_credentials: false
+          hide_credentials: true
       - name: acl
         config:
           hide_groups_header: true
@@ -136,7 +136,7 @@ services:
       - name: cors
       - name: key-auth
         config:
-          hide_credentials: false
+          hide_credentials: true
       - name: acl
         config:
           hide_groups_header: true
@@ -158,7 +158,7 @@ services:
       - name: cors
       - name: key-auth
         config:
-          hide_credentials: false
+          hide_credentials: true
       - name: acl
         config:
           hide_groups_header: true
@@ -179,7 +179,7 @@ services:
     plugins:
       - name: key-auth
         config:
-          hide_credentials: false
+          hide_credentials: true
       - name: acl
         config:
           hide_groups_header: true
@@ -193,7 +193,19 @@ plugins:
   - name: cors
     config:
       origins:
-        - "*"
+        # Production domains
+        - "https://dashboard.life-os.fwanner.de"
+        - "https://life-os.fwanner.de"
+        - "https://n8n.life-os.fwanner.de"
+        - "https://studio.life-os.fwanner.de"
+        # Local development
+        - "http://localhost"
+        - "http://localhost:3000"
+        - "http://localhost:5173"
+        - "http://dashboard.localhost"
+        - "http://api.localhost"
+        - "https://dashboard.localhost"
+        - "https://api.localhost"
       methods:
         - GET
         - POST
@@ -216,6 +228,15 @@ plugins:
         - X-Auth-Token
       credentials: true
       max_age: 3600
+
+  # Rate Limiting - Schutz gegen Brute-Force und DDoS
+  - name: rate-limiting
+    config:
+      minute: 60
+      hour: 1000
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
 
   - name: request-transformer
     config:

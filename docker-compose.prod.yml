@@ -105,6 +105,7 @@ services:
 
   # ───────────────────────────────────────────────────────────────
   # PostgreSQL Database
+  # SECURITY: No ports exposed in production - only internal Docker network
   # ───────────────────────────────────────────────────────────────
   supabase-db:
     restart: always
@@ -163,15 +164,18 @@ services:
       - max_parallel_workers=4
       - -c
       - max_parallel_maintenance_workers=2
-      # Logging
+      # Security hardening
+      - -c
+      - password_encryption=scram-sha-256
+      # Logging (enabled for security auditing)
       - -c
       - log_min_duration_statement=1000
       - -c
       - log_checkpoints=on
       - -c
-      - log_connections=off
+      - log_connections=on
       - -c
-      - log_disconnections=off
+      - log_disconnections=on
       - -c
       - log_lock_waits=on
     healthcheck:
