@@ -126,7 +126,7 @@ services:
 
   # WebSocket für Realtime
   - name: realtime-v1-ws
-    url: http://supabase-realtime:4000/socket
+    url: http://supabase-realtime:4000/socket/websocket
     routes:
       - name: realtime-v1-ws
         strip_path: true
