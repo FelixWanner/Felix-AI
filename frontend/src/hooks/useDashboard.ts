@@ -142,7 +142,7 @@ export function useTodayTasks() {
         .from('inbox_items')
         .select('*')
         .or(`due_date.eq.${today},scheduled_date.eq.${today},status.eq.today`)
-        .not('status', 'in', '("done","delegated")')
+        .not('status', 'in', '("completed","archived")')
         .order('priority')
         .limit(10)
 
@@ -174,7 +174,7 @@ export function useQuickStats() {
       const { count: inboxCount, error: inboxError } = await supabase
         .from('inbox_items')
         .select('*', { count: 'exact', head: true })
-        .not('status', 'in', '("done","delegated")')
+        .not('status', 'in', '("completed","archived")')
 
       if (inboxError) throw inboxError
 
@@ -184,7 +184,7 @@ export function useQuickStats() {
         .from('inbox_items')
         .select('*', { count: 'exact', head: true })
         .lt('due_date', today)
-        .not('status', 'in', '("done","delegated")')
+        .not('status', 'in', '("completed","archived")')
 
       if (overdueError) throw overdueError
 

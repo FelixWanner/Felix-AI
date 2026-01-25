@@ -196,20 +196,8 @@ export default function Fitness() {
         setHasCardio(false)
       }
 
-      // Load Supplement Compliance
-      const { data: suppCompData } = await supabase
-        .from('supplement_compliance')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('date', dateStr)
-
-      const complianceMap: Record<string, boolean> = {}
-      if (suppCompData) {
-        suppCompData.forEach(item => {
-          complianceMap[item.slot_name] = item.taken
-        })
-      }
-      setSupplementCompliance(complianceMap)
+      // Note: Supplement tracking is handled by the SupplementChecklist component
+      // which uses the daily_supplement_tracking table directly
 
     } catch (error) {
       console.error('Error loading fitness data:', error)
