@@ -143,7 +143,7 @@ export default function Fitness() {
         .select('*')
         .eq('user_id', user.id)
         .eq('date', dateStr)
-        .single()
+        .maybeSingle()
 
       if (bodyData) {
         setWeightKg(bodyData.weight_kg)
@@ -154,6 +154,16 @@ export default function Fitness() {
         setSleepScore(bodyData.sleep_score)
         setBodyBattery(bodyData.body_battery)
         setBodyNotes(bodyData.notes || '')
+      } else {
+        // Reset body tracking fields when no data exists for this date
+        setWeightKg(null)
+        setWaistCm(null)
+        setBpSys(null)
+        setBpDia(null)
+        setRestingHr(null)
+        setSleepScore(null)
+        setBodyBattery(null)
+        setBodyNotes('')
       }
 
       // Load Nutrition Compliance
@@ -162,7 +172,7 @@ export default function Fitness() {
         .select('*')
         .eq('user_id', user.id)
         .eq('date', dateStr)
-        .single()
+        .maybeSingle()
 
       if (nutritionData) {
         setPlanFollowed(nutritionData.plan_followed)
@@ -174,6 +184,17 @@ export default function Fitness() {
         setIngredientsWeighed(nutritionData.ingredients_weighed ?? true)
         setPostWorkoutPart1(nutritionData.post_workout_part1_correct ?? true)
         setPostWorkoutPart2(nutritionData.post_workout_part2_correct ?? true)
+      } else {
+        // Reset nutrition fields when no data exists for this date
+        setPlanFollowed(true)
+        setDeviationReason('')
+        setDeviationCategory('')
+        setMealReplaced('')
+        setWaterLiters(null)
+        setSaltSufficient(true)
+        setIngredientsWeighed(true)
+        setPostWorkoutPart1(true)
+        setPostWorkoutPart2(true)
       }
 
       // Load Cardio Session
@@ -182,7 +203,7 @@ export default function Fitness() {
         .select('*')
         .eq('user_id', user.id)
         .eq('date', dateStr)
-        .single()
+        .maybeSingle()
 
       if (cardioData) {
         setHasCardio(true)
@@ -193,7 +214,14 @@ export default function Fitness() {
         setHrRangeHigh(cardioData.hr_range_high)
         setCardioNotes(cardioData.notes || '')
       } else {
+        // Reset cardio fields when no data exists for this date
         setHasCardio(false)
+        setCardioType('nüchtern')
+        setCardioDuration(null)
+        setAvgHeartRate(null)
+        setHrRangeLow(120)
+        setHrRangeHigh(140)
+        setCardioNotes('')
       }
 
       // Note: Supplement tracking is handled by the SupplementChecklist component
@@ -232,7 +260,7 @@ export default function Fitness() {
         .select('id')
         .eq('user_id', user.id)
         .eq('date', dateStr)
-        .single()
+        .maybeSingle()
 
       if (existing) {
         // Update only the fields we have
