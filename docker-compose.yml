@@ -288,6 +288,14 @@ services:
       ENABLE_TAILSCALE: "false"
       DNS_NODES: "''"
       RLIMIT_NOFILE: "10000"
+      # Self-hosted configuration
+      SELF_HOST: "true"
+      SEED_SELF_HOST: "true"
+      SECURE_CHANNELS: "true"
+      REPLICATION_MODE: RLS
+      REPLICATION_POLL_INTERVAL: "100"
+      SLOT_NAME: supabase_realtime_rls
+      TEMPORARY_SLOT: "true"
     networks:
       - lifeos-net
     depends_on:
