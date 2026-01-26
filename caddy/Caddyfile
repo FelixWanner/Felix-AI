@@ -205,7 +205,7 @@ api.life-os.fwanner.de {
 # ───────────────────────────────────────────────────────────────
 studio.life-os.fwanner.de {
 	# Basic Auth Protection
-	basicauth {
+	basic_auth {
 		admin $2a$14$kjKdoCF2i16K8xPpQTv4q.gG6/ue.MSJUJJ5oGwXqtMOapqox5q46
 	}
 

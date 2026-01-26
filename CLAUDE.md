@@ -61,3 +61,43 @@ const { data } = await supabase
 - API: https://api.life-os.fwanner.de
 - N8N: https://n8n.life-os.fwanner.de
 - Studio: https://studio.life-os.fwanner.de
+
+## n8n Konfiguration
+
+### Authentifizierung
+- n8n 2.x verwendet internes User Management (nicht mehr Basic Auth)
+- Login: `fw@redcastle-eg.de`
+- Jeder Benutzer braucht ein "Personal Project"
+
+### Credentials und Workflows
+- Credentials und Workflows müssen einem Projekt zugewiesen sein
+- Prüfen mit:
+```sql
+-- In n8n Datenbank
+SELECT c.name, sc."projectId" FROM credentials_entity c
+LEFT JOIN shared_credentials sc ON c.id = sc."credentialsId";
+```
+
+### Reverse Proxy
+- `N8N_PROXY_HOPS=1` muss gesetzt sein (nicht N8N_TRUST_PROXY)
+- Verhindert X-Forwarded-For Fehler
+
+## Datenbank
+
+### Neue Tabellen erstellen
+Bei neuen Frontend-Features immer prüfen:
+1. Tabelle existiert in PostgreSQL
+2. RLS ist aktiviert
+3. RLS Policies sind erstellt
+
+```sql
+-- Template für neue Tabellen
+CREATE TABLE IF NOT EXISTS new_table (...);
+ALTER TABLE new_table ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "..." ON new_table FOR SELECT USING (...);
+```
+
+## Caddy
+
+### Basic Auth
+- Verwende `basic_auth` (nicht `basicauth` - deprecated)

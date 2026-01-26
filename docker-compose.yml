@@ -54,13 +54,18 @@ services:
       retries: 5
       start_period: 30s
     environment:
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
-      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD}
+      # Host & Protocol
       - N8N_HOST=${N8N_HOST:-n8n.localhost}
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
+      - N8N_EDITOR_BASE_URL=https://${N8N_HOST:-n8n.localhost}
       - WEBHOOK_URL=https://${N8N_HOST:-n8n.localhost}
+      # Reverse Proxy Settings
+      - N8N_PROXY_HOPS=1
+      # Disable Telemetry
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_VERSION_NOTIFICATIONS_ENABLED=false
+      # Timezone
       - GENERIC_TIMEZONE=Europe/Berlin
       - TZ=Europe/Berlin
       # Database
