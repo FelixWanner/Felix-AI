@@ -97,6 +97,32 @@ http://studio.localhost {
 	}
 }
 
+# ───────────────────────────────────────────────────────────────
+# Docling Document Processing UI
+# http://docling.localhost
+# ───────────────────────────────────────────────────────────────
+http://docling.localhost {
+	reverse_proxy docling:5001
+
+	header {
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# Portainer Docker Management
+# http://portainer.localhost
+# ───────────────────────────────────────────────────────────────
+http://portainer.localhost {
+	reverse_proxy portainer:9000
+
+	header {
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}
+
 # ═══════════════════════════════════════════════════════════════
 # PRODUCTION - life-os.fwanner.de
 # ═══════════════════════════════════════════════════════════════
@@ -271,6 +297,61 @@ realtime.life-os.fwanner.de {
 
 	log {
 		output file /data/logs/realtime.log
+		format json
+	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# Docling Document Processing UI - PROTECTED
+# https://docling.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────
+# Portainer Docker Management - PROTECTED
+# https://portainer.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+portainer.life-os.fwanner.de {
+	# Basic Auth Protection (wie Studio)
+	basic_auth {
+		admin $2a$14$kjKdoCF2i16K8xPpQTv4q.gG6/ue.MSJUJJ5oGwXqtMOapqox5q46
+	}
+
+	reverse_proxy portainer:9000
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output file /data/logs/portainer.log
+		format json
+	}
+}
+
+docling.life-os.fwanner.de {
+	# Basic Auth Protection (wie Studio)
+	basic_auth {
+		admin $2a$14$kjKdoCF2i16K8xPpQTv4q.gG6/ue.MSJUJJ5oGwXqtMOapqox5q46
+	}
+
+	reverse_proxy docling:5001
+
+	# Erhöhtes Upload-Limit (100MB)
+	request_body {
+		max_size 100MB
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output file /data/logs/docling.log
 		format json
 	}
 }

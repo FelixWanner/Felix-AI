@@ -80,9 +80,19 @@ services:
       - EXECUTIONS_DATA_MAX_AGE=168
       # API
       - N8N_API_KEY=${N8N_API_KEY}
+      # Supabase (for workflows that access Supabase Storage)
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      # Telegram (for workflow notifications)
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      # Allow Node.js built-in modules in Code nodes (fs, crypto, path)
+      - NODE_FUNCTION_ALLOW_BUILTIN=*
+      - NODE_FUNCTION_ALLOW_EXTERNAL=*
     volumes:
       - n8n_data:/home/node/.n8n
       - ./n8n/workflows:/home/node/workflows:ro
+      - /root/documents:/home/node/documents:ro
     networks:
       - lifeos-net
     depends_on:
@@ -115,6 +125,41 @@ services:
     restart: "no"
 
   # ═══════════════════════════════════════════════════════════════
+  # DOCLING - Document Processing Service (IBM)
+  # ═══════════════════════════════════════════════════════════════
+  docling:
+    image: quay.io/docling-project/docling-serve:latest
+    container_name: lifeos-docling
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    environment:
+      - DOCLING_SERVE_ENABLE_UI=true
+      - DOCLING_SERVE_HOST=0.0.0.0
+      - DOCLING_SERVE_PORT=5001
+    volumes:
+      - /root/documents:/documents:ro
+    networks:
+      - lifeos-net
+
+  # ═══════════════════════════════════════════════════════════════
+  # PORTAINER - Docker Management UI
+  # ═══════════════════════════════════════════════════════════════
+  portainer:
+    image: portainer/portainer-ce:2.27.3
+    container_name: lifeos-portainer
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer_data:/data
+    networks:
+      - lifeos-net
+
+  # ═══════════════════════════════════════════════════════════════
   # SUPABASE - Database & Backend
   # ═══════════════════════════════════════════════════════════════
   
@@ -143,7 +188,9 @@ services:
       - supabase_db_data:/var/lib/postgresql/data
       # Note: Custom migrations removed - Supabase image handles schema initialization
     networks:
-      - lifeos-net
+      lifeos-net:
+        aliases:
+          - db
     command:
       - postgres
       - -c
@@ -394,6 +441,7 @@ volumes:
   caddy_data:
   caddy_config:
   n8n_data:
+  portainer_data:
   supabase_db_data:
   supabase_storage_data:
 
