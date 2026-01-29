@@ -1,0 +1,336 @@
+{
+  "name": "11 - Check Outlook Inbox",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Every 30 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 50,
+        "filters": {
+          "folderId": "inbox",
+          "isRead": false
+        },
+        "options": {}
+      },
+      "id": "get-emails",
+      "name": "Get Unread Emails",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "outlook-creds",
+          "name": "Microsoft Outlook"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyze emails and identify important ones\nconst emails = $input.all();\nconst now = new Date();\nconst importantEmails = [];\nconst followUpNeeded = [];\n\nfor (const emailItem of emails) {\n  const email = emailItem.json;\n  const receivedDate = new Date(email.receivedDateTime);\n  const hoursAgo = (now - receivedDate) / (1000 * 60 * 60);\n  \n  const importance = analyzeImportance(email, hoursAgo);\n  \n  if (importance.score >= 7 || hoursAgo > 24) {\n    followUpNeeded.push({\n      id: email.id,\n      subject: email.subject,\n      from: email.from?.emailAddress?.name || email.from?.emailAddress?.address,\n      from_email: email.from?.emailAddress?.address,\n      received: email.receivedDateTime,\n      hours_ago: Math.round(hoursAgo),\n      importance_score: importance.score,\n      importance_reason: importance.reason,\n      preview: email.bodyPreview?.substring(0, 200) || ''\n    });\n  }\n}\n\nfunction analyzeImportance(email, hoursAgo) {\n  let score = 5;\n  let reasons = [];\n  \n  // High importance flag\n  if (email.importance === 'high') {\n    score += 3;\n    reasons.push('High importance');\n  }\n  \n  // From known important contacts\n  const sender = email.from?.emailAddress?.address?.toLowerCase() || '';\n  const importantDomains = ['bank', 'steuer', 'finanz', 'notar', 'anwalt', 'gericht'];\n  if (importantDomains.some(d => sender.includes(d))) {\n    score += 2;\n    reasons.push('Important sender');\n  }\n  \n  // Keywords in subject\n  const subject = (email.subject || '').toLowerCase();\n  const urgentKeywords = ['dringend', 'urgent', 'wichtig', 'asap', 'frist', 'deadline', 'termin'];\n  if (urgentKeywords.some(k => subject.includes(k))) {\n    score += 2;\n    reasons.push('Urgent keywords');\n  }\n  \n  // Age factor\n  if (hoursAgo > 48) {\n    score += 2;\n    reasons.push('Old email (>48h)');\n  } else if (hoursAgo > 24) {\n    score += 1;\n    reasons.push('Waiting >24h');\n  }\n  \n  return {\n    score: Math.min(score, 10),\n    reason: reasons.join(', ')\n  };\n}\n\nreturn [{\n  json: {\n    total_unread: emails.length,\n    needs_attention: followUpNeeded.length,\n    emails: followUpNeeded\n  }\n}];"
+      },
+      "id": "analyze-emails",
+      "name": "Analyze Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.needs_attention }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "has-important",
+      "name": "Important Emails?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create inbox items for emails needing attention\nconst data = $input.first().json;\n\nreturn data.emails.map(email => ({\n  json: {\n    source: 'outlook',\n    source_id: `outlook_${email.id}`,\n    item_type: 'email',\n    title: `Email: ${email.subject}`,\n    content: `**From:** ${email.from} (${email.from_email})\\n**Received:** ${new Date(email.received).toLocaleString('de-DE')} (${email.hours_ago}h ago)\\n\\n**Preview:**\\n${email.preview}\\n\\n**Why important:** ${email.importance_reason}`,\n    priority: email.importance_score >= 8 ? 'high' : 'medium',\n    status: 'pending',\n    metadata: {\n      outlook_id: email.id,\n      from_email: email.from_email,\n      importance_score: email.importance_score\n    }\n  }\n}));"
+      },
+      "id": "create-inbox-items",
+      "name": "Create Inbox Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "inbox_items",
+        "columns": "source, source_id, item_type, title, content, priority, status, metadata",
+        "conflictColumns": "source_id",
+        "options": {}
+      },
+      "id": "upsert-inbox",
+      "name": "Upsert Inbox Items",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        200
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare daily digest if there are many emails\nconst data = $('Analyze Emails').first().json;\n\nif (data.needs_attention >= 3) {\n  let message = `📧 *Outlook Inbox Check*\\n\\n`;\n  message += `📬 ${data.total_unread} ungelesene E-Mails\\n`;\n  message += `⚠️ ${data.needs_attention} brauchen Aufmerksamkeit:\\n\\n`;\n  \n  for (const email of data.emails.slice(0, 5)) {\n    const icon = email.importance_score >= 8 ? '🔴' : '🟡';\n    message += `${icon} *${email.subject.substring(0, 40)}*\\n`;\n    message += `   Von: ${email.from} (${email.hours_ago}h)\\n\\n`;\n  }\n  \n  if (data.emails.length > 5) {\n    message += `\\n... und ${data.emails.length - 5} weitere`;\n  }\n  \n  return [{ json: { message, send: true } }];\n}\n\nreturn [{ json: { send: false } }];"
+      },
+      "id": "prepare-digest",
+      "name": "Prepare Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.send }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "should-notify",
+      "name": "Should Notify?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1560,
+        320
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-creds",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "sync_status",
+        "columns": "last_sync_at, last_sync_status, items_synced",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "source",
+              "keyValue": "outlook"
+            }
+          ]
+        }
+      },
+      "id": "update-sync",
+      "name": "Update Sync Status",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        500
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 30 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Get Unread Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Unread Emails": {
+      "main": [
+        [
+          {
+            "node": "Analyze Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Emails": {
+      "main": [
+        [
+          {
+            "node": "Important Emails?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Important Emails?": {
+      "main": [
+        [
+          {
+            "node": "Create Inbox Items",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Digest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Inbox Items": {
+      "main": [
+        [
+          {
+            "node": "Upsert Inbox Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Inbox Items": {
+      "main": [
+        [
+          {
+            "node": "Update Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Digest": {
+      "main": [
+        [
+          {
+            "node": "Should Notify?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Notify?": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Send Telegram": {
+      "main": [
+        [
+          {
+            "node": "Update Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "productivity"
+    },
+    {
+      "name": "sync"
+    }
+  ],
+  "active": false
+}

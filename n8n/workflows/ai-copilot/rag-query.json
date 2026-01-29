@@ -1,0 +1,316 @@
+{
+  "name": "RAG Query - Document Search",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rag-query",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "rag-query-webhook"
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"text-embedding-3-small\",\n  \"input\": {{ JSON.stringify($json.body.query) }},\n  \"dimensions\": 1536\n}",
+        "options": {}
+      },
+      "id": "create-query-embedding",
+      "name": "Create Query Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "2gJYiwjzGma3vMh1",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract embedding from OpenAI response\nconst response = $input.first().json;\nconst query = $('Webhook Trigger').first().json.body.query;\nconst chatId = $('Webhook Trigger').first().json.body.chat_id;\n\nif (!response.data || !response.data[0]) {\n  return { error: 'Failed to create embedding', query, chat_id: chatId };\n}\n\nconst embedding = response.data[0].embedding;\n\nreturn {\n  query: query,\n  chat_id: chatId,\n  embedding_array: `[${embedding.join(',')}]`\n};"
+      },
+      "id": "prepare-embedding",
+      "name": "Prepare Embedding",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM match_documents(\n  '{{ $json.embedding_array }}'::vector(1536),\n  0.65,\n  5\n)",
+        "options": {}
+      },
+      "id": "search-documents",
+      "name": "Search Documents (Vector)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [900, 300],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "NG1j8CLMwUIHYhaW",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format search results as context\nconst results = $input.all().map(i => i.json).filter(r => r.content);\nconst query = $('Prepare Embedding').first().json.query;\nconst chatId = $('Prepare Embedding').first().json.chat_id;\n\nif (results.length === 0) {\n  return {\n    query: query,\n    chat_id: chatId,\n    has_context: false,\n    context: '',\n    sources: []\n  };\n}\n\n// Build context from chunks\nconst contextParts = results.map((r, i) => {\n  return `[Dokument ${i + 1}: \"${r.document_title}\" (${r.document_type || 'Unbekannt'})${r.property_name ? ', ' + r.property_name : ''}]\\n${r.content}`;\n});\n\nconst context = contextParts.join('\\n\\n---\\n\\n');\n\n// Extract unique sources\nconst sources = [...new Set(results.map(r => ({\n  title: r.document_title,\n  type: r.document_type,\n  property: r.property_name,\n  similarity: (r.similarity * 100).toFixed(1) + '%'\n})))];\n\nreturn {\n  query: query,\n  chat_id: chatId,\n  has_context: true,\n  context: context,\n  sources: sources,\n  chunk_count: results.length\n};"
+      },
+      "id": "format-context",
+      "name": "Format Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-context",
+              "leftValue": "={{ $json.has_context }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-context",
+      "name": "Has Context?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o-mini\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Du bist ein hilfreicher Assistent, der Fragen basierend auf Dokumenten aus dem Life OS beantwortet. Antworte auf Deutsch, präzise und basierend auf dem bereitgestellten Kontext. Wenn du die Antwort nicht im Kontext findest, sage das ehrlich. Verweise auf die relevanten Dokumente.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Kontext aus Dokumenten:\\n\\n{{ $json.context.replace(/\"/g, '\\\\\"').replace(/\\n/g, '\\\\n') }}\\n\\n---\\n\\nFrage: {{ $json.query.replace(/\"/g, '\\\\\"') }}\"\n    }\n  ],\n  \"temperature\": 0.3,\n  \"max_tokens\": 1000\n}",
+        "options": {}
+      },
+      "id": "openai-rag-response",
+      "name": "OpenAI RAG Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "2gJYiwjzGma3vMh1",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format final response with sources\nconst aiResponse = $input.first().json;\nconst contextData = $('Format Context').first().json;\n\nlet answer = 'Keine Antwort erhalten.';\n\nif (aiResponse.choices && aiResponse.choices[0]) {\n  answer = aiResponse.choices[0].message.content;\n}\n\n// Build source references\nconst sourceList = contextData.sources.map((s, i) => \n  `${i + 1}. ${s.title} (${s.type || 'Unbekannt'})${s.property ? ' - ' + s.property : ''}`\n).join('\\n');\n\nconst response = `:mag: **Dokumentensuche**\\n\\n${answer}\\n\\n---\\n:page_facing_up: **Quellen** (${contextData.chunk_count} Chunks):\\n${sourceList}`;\n\nreturn {\n  response: response,\n  chat_id: contextData.chat_id,\n  success: true\n};"
+      },
+      "id": "format-rag-response",
+      "name": "Format RAG Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// No documents found response\nconst contextData = $input.first().json;\n\nconst response = `:mag: **Dokumentensuche**\\n\\nLeider habe ich keine relevanten Dokumente zu deiner Anfrage gefunden.\\n\\nVersuche es mit anderen Suchbegriffen oder stelle sicher, dass relevante Dokumente indexiert wurden.\\n\\n:bulb: Tipp: Lade PDFs in Life OS hoch und sie werden automatisch durchsuchbar.`;\n\nreturn {\n  response: response,\n  chat_id: contextData.chat_id,\n  success: false\n};"
+      },
+      "id": "format-no-results",
+      "name": "Format No Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2000, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Create Query Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Query Embedding": {
+      "main": [
+        [
+          {
+            "node": "Prepare Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Embedding": {
+      "main": [
+        [
+          {
+            "node": "Search Documents (Vector)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Documents (Vector)": {
+      "main": [
+        [
+          {
+            "node": "Format Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Context": {
+      "main": [
+        [
+          {
+            "node": "Has Context?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Context?": {
+      "main": [
+        [
+          {
+            "node": "OpenAI RAG Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format No Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI RAG Response": {
+      "main": [
+        [
+          {
+            "node": "Format RAG Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format RAG Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format No Results": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "life-os"
+  },
+  "tags": [
+    {
+      "name": "ai-copilot",
+      "id": "ai-copilot-tag"
+    },
+    {
+      "name": "rag",
+      "id": "rag-tag"
+    }
+  ],
+  "pinData": {},
+  "staticData": null,
+  "triggerCount": 0
+}

@@ -1,0 +1,867 @@
+{
+  "name": "Generate AI Insights (Daily Analysis)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 22 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 22:00 Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 500]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/get_expiring_loan_rates",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-expiring-loans",
+      "name": "Get Expiring Loan Rates",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/get_tax_free_properties",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-tax-free-properties",
+      "name": "Get 10-Year Tax Properties",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/get_low_balance_accounts",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-low-balance-accounts",
+      "name": "Get Low Balance Accounts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/get_struggling_habits",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-struggling-habits",
+      "name": "Get Struggling Habits",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/get_health_trends",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-health-trends",
+      "name": "Get Health Trends",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 500]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/get_position_alerts",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-position-alerts",
+      "name": "Get Position Alerts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/get_due_invoices",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-due-invoices",
+      "name": "Get Due Invoices",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 700]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/get_expiring_tenant_contracts",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-expiring-tenants",
+      "name": "Get Expiring Tenant Contracts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 800]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect all findings and create insight objects\nconst loans = $('Get Expiring Loan Rates').first().json || [];\nconst properties = $('Get 10-Year Tax Properties').first().json || [];\nconst accounts = $('Get Low Balance Accounts').first().json || [];\nconst habits = $('Get Struggling Habits').first().json || [];\nconst health = $('Get Health Trends').first().json || [];\nconst positions = $('Get Position Alerts').first().json || [];\nconst invoices = $('Get Due Invoices').first().json || [];\nconst tenants = $('Get Expiring Tenant Contracts').first().json || [];\n\nconst findings = [];\n\n// Process expiring loans\n(Array.isArray(loans) ? loans : []).forEach(loan => {\n  const daysLeft = parseInt(loan.days_until_expiry) || 0;\n  findings.push({\n    type: 'loan_rate_expiring',\n    category: 'wealth',\n    priority: daysLeft < 30 ? 'action_required' : daysLeft < 90 ? 'warning' : 'info',\n    context: `Darlehen \"${loan.name}\" bei ${loan.institution}: Zinsbindung endet in ${daysLeft} Tagen (${new Date(loan.interest_fixed_until).toLocaleDateString('de-DE')}). Aktueller Zins: ${loan.interest_rate}%, Restschuld: ${parseFloat(loan.current_balance).toLocaleString('de-DE')}€`,\n    entity_type: 'loan',\n    entity_id: loan.id,\n    data: loan\n  });\n});\n\n// Process tax-free properties\n(Array.isArray(properties) ? properties : []).forEach(prop => {\n  const yearsOwned = parseFloat(prop.years_owned) || 0;\n  const monthsUntil10Years = Math.round((10 - yearsOwned) * 12);\n  findings.push({\n    type: 'tax_free_approaching',\n    category: 'wealth',\n    priority: monthsUntil10Years <= 3 ? 'action_required' : 'info',\n    context: `Immobilie \"${prop.name}\" (${prop.street}, ${prop.city}): 10-Jahres-Frist für steuerfreien Verkauf in ca. ${monthsUntil10Years} Monaten erreicht. Kaufpreis: ${parseFloat(prop.purchase_price).toLocaleString('de-DE')}€, aktueller Wert: ${parseFloat(prop.current_value || 0).toLocaleString('de-DE')}€`,\n    entity_type: 'property',\n    entity_id: prop.id,\n    data: prop\n  });\n});\n\n// Process low balance accounts\n(Array.isArray(accounts) ? accounts : []).forEach(acc => {\n  findings.push({\n    type: 'low_balance',\n    category: 'wealth',\n    priority: acc.current_balance < 0 ? 'action_required' : 'warning',\n    context: `Konto \"${acc.name}\" (${acc.institution}): Kontostand ${parseFloat(acc.current_balance).toLocaleString('de-DE')}€ liegt unter Schwellenwert von ${parseFloat(acc.low_balance_threshold).toLocaleString('de-DE')}€`,\n    entity_type: 'account',\n    entity_id: acc.id,\n    data: acc\n  });\n});\n\n// Process struggling habits\n(Array.isArray(habits) ? habits : []).forEach(habit => {\n  findings.push({\n    type: 'habit_streak_risk',\n    category: 'health',\n    priority: (habit.completion_rate || 0) < 25 ? 'warning' : 'info',\n    context: `Habit \"${habit.name}\" (${habit.category}): Nur ${habit.completion_rate || 0}% Completion Rate in den letzten 14 Tagen (${habit.completed_count}/${habit.total_count})`,\n    entity_type: 'habit',\n    entity_id: habit.id,\n    data: habit\n  });\n});\n\n// Process health trends\n(Array.isArray(health) ? health : []).forEach(h => {\n  if (!h.health_concern) return;\n  \n  const concernMessages = {\n    'poor_sleep': `Schlechte Schlafqualität: Durchschnittlich ${Math.round(h.avg_sleep_7d || 0)}/100 in den letzten 7 Tagen`,\n    'high_stress': `Erhöhter Stress: Durchschnittlich ${Math.round(h.avg_stress_7d || 0)} in den letzten 7 Tagen`,\n    'low_energy': `Niedrige Energie: Body Battery durchschnittlich ${Math.round(h.avg_body_battery_7d || 0)}% in den letzten 7 Tagen`,\n    'declining_sleep': `Schlafqualität verschlechtert sich: Von ${Math.round(h.avg_sleep_prev || 0)} auf ${Math.round(h.avg_sleep_7d || 0)}`,\n    'increasing_stress': `Stress nimmt zu: Von ${Math.round(h.avg_stress_prev || 0)} auf ${Math.round(h.avg_stress_7d || 0)}`\n  };\n  \n  findings.push({\n    type: 'health_warning',\n    category: 'health',\n    priority: h.health_concern === 'poor_sleep' || h.health_concern === 'high_stress' ? 'warning' : 'info',\n    context: concernMessages[h.health_concern] || 'Gesundheitstrend erkannt',\n    entity_type: 'garmin_stats',\n    entity_id: null,\n    data: h\n  });\n});\n\n// Process position alerts\n(Array.isArray(positions) ? positions : []).forEach(pos => {\n  const gain = parseFloat(pos.unrealized_gain_loss_percent) || 0;\n  const isLoss = gain < 0;\n  \n  findings.push({\n    type: isLoss ? 'position_loss_alert' : 'position_gain_alert',\n    category: 'wealth',\n    priority: Math.abs(gain) > 30 ? 'warning' : 'info',\n    context: `Position ${pos.symbol} (${pos.name}): ${isLoss ? 'Verlust' : 'Gewinn'} von ${Math.abs(gain).toFixed(1)}% (${parseFloat(pos.unrealized_gain_loss).toLocaleString('de-DE')}€). Aktueller Wert: ${parseFloat(pos.current_value).toLocaleString('de-DE')}€`,\n    entity_type: 'position',\n    entity_id: pos.id,\n    data: pos\n  });\n});\n\n// Process due invoices\n(Array.isArray(invoices) ? invoices : []).forEach(inv => {\n  const daysLeft = parseInt(inv.days_until_due) || 0;\n  findings.push({\n    type: 'invoice_due',\n    category: 'wealth',\n    priority: daysLeft <= 0 ? 'action_required' : daysLeft <= 3 ? 'warning' : 'info',\n    context: `Rechnung ${inv.invoice_number} von ${inv.vendor_name}: ${parseFloat(inv.total_amount).toLocaleString('de-DE')}€ ${daysLeft <= 0 ? 'ÜBERFÄLLIG' : `fällig in ${daysLeft} Tagen`} (${new Date(inv.due_date).toLocaleDateString('de-DE')})`,\n    entity_type: 'invoice',\n    entity_id: inv.id,\n    data: inv\n  });\n});\n\n// Process expiring tenant contracts\n(Array.isArray(tenants) ? tenants : []).forEach(tenant => {\n  const daysLeft = parseInt(tenant.days_until_end) || 0;\n  findings.push({\n    type: 'tenant_contract_expiring',\n    category: 'wealth',\n    priority: daysLeft < 30 ? 'action_required' : daysLeft < 60 ? 'warning' : 'info',\n    context: `Mietvertrag ${tenant.first_name} ${tenant.last_name} (${tenant.property_name}, ${tenant.unit_number}): Endet in ${daysLeft} Tagen (${new Date(tenant.contract_end_date).toLocaleDateString('de-DE')}). Miete: ${parseFloat(tenant.monthly_rent).toLocaleString('de-DE')}€/Monat`,\n    entity_type: 'tenant',\n    entity_id: tenant.id,\n    data: tenant\n  });\n});\n\n// Return findings as individual items\nif (findings.length === 0) {\n  return [{ json: { no_findings: true } }];\n}\n\nreturn findings.map(f => ({ json: f }));"
+      },
+      "id": "collect-findings",
+      "name": "Collect All Findings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-findings",
+              "leftValue": "={{ $json.no_findings }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-findings",
+      "name": "Has Findings?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 500]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "batch-findings",
+      "name": "Batch Findings",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1340, 400]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o-mini\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Du bist ein persönlicher Finanz- und Lebensberater. Generiere kurze, prägnante Insights auf Deutsch. Jeder Insight sollte:\\n1. Einen klaren Titel haben (max 80 Zeichen)\\n2. Eine kurze Handlungsempfehlung geben\\n3. Konkret und umsetzbar sein\\n\\nAntworte im JSON-Format: {\\\"title\\\": \\\"...\\\", \\\"message\\\": \\\"...\\\", \\\"suggested_actions\\\": [\\\"Aktion 1\\\", \\\"Aktion 2\\\"]}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Erstelle einen Insight für folgendes Finding:\\n\\nTyp: {{ $json.type }}\\nKategorie: {{ $json.category }}\\nPriorität: {{ $json.priority }}\\nKontext: {{ $json.context }}\"\n    }\n  ],\n  \"temperature\": 0.7,\n  \"max_tokens\": 300\n}",
+        "options": {}
+      },
+      "id": "generate-insight",
+      "name": "Generate AI Insight",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 400],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "openai-api",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response and prepare for database insert\nconst finding = $('Batch Findings').first().json;\nconst aiResponse = $input.first().json;\n\nlet title = finding.type;\nlet message = finding.context;\nlet suggestedActions = [];\n\ntry {\n  const content = aiResponse.choices?.[0]?.message?.content || '';\n  // Try to parse JSON from response\n  const jsonMatch = content.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    const parsed = JSON.parse(jsonMatch[0]);\n    title = parsed.title || title;\n    message = parsed.message || message;\n    suggestedActions = parsed.suggested_actions || [];\n  }\n} catch (e) {\n  // Use defaults if parsing fails\n  console.log('Failed to parse AI response:', e.message);\n}\n\nreturn {\n  json: {\n    insight_type: finding.type,\n    category: finding.category,\n    priority: finding.priority,\n    title: title,\n    message: message,\n    data: finding.data || {},\n    suggested_actions: suggestedActions.map(a => ({ action: 'custom', label: a })),\n    related_entity_type: finding.entity_type,\n    related_entity_id: finding.entity_id,\n    original_context: finding.context\n  }\n};"
+      },
+      "id": "prepare-insight",
+      "name": "Prepare Insight Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/insert_ai_insight",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"p_insight_type\": \"{{ $json.insight_type }}\",\n  \"p_category\": \"{{ $json.category }}\",\n  \"p_priority\": \"{{ $json.priority }}\",\n  \"p_title\": {{ JSON.stringify($json.title) }},\n  \"p_message\": {{ JSON.stringify($json.message) }},\n  \"p_data\": {{ JSON.stringify($json.data) }},\n  \"p_suggested_actions\": {{ JSON.stringify($json.suggested_actions) }},\n  \"p_related_entity_type\": {{ $json.related_entity_type ? JSON.stringify($json.related_entity_type) : 'null' }},\n  \"p_related_entity_id\": {{ $json.related_entity_id ? JSON.stringify($json.related_entity_id) : 'null' }}\n}",
+        "options": {}
+      },
+      "id": "insert-insight",
+      "name": "Insert Insight",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-done",
+              "leftValue": "={{ $('Batch Findings').first().context.noItemsLeft }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-all-done",
+      "name": "All Done?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2220, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/get_high_priority_insights",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-high-priority",
+      "name": "Get High Priority Insights",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format insights for Telegram\nconst response = $input.first().json;\nconst insights = Array.isArray(response) ? response : [];\n\nif (insights.length === 0) {\n  return { json: { has_alerts: false } };\n}\n\nconst priorityEmoji = {\n  'action_required': '🚨',\n  'warning': '⚠️',\n  'info': 'ℹ️'\n};\n\nconst categoryEmoji = {\n  'wealth': '💰',\n  'health': '❤️',\n  'productivity': '🎯',\n  'goals': '🏆'\n};\n\nconst insightTexts = insights.map((insight, i) => {\n  const pEmoji = priorityEmoji[insight.priority] || 'ℹ️';\n  const cEmoji = categoryEmoji[insight.category] || '💡';\n  return `${pEmoji} **${insight.title}**\\n${cEmoji} ${insight.message}`;\n});\n\nconst message = `🧠 **Tägliche AI Insights**\\n\\n${insightTexts.join('\\n\\n---\\n\\n')}\\n\\n_${insights.length} neue Insights generiert_`;\n\nreturn {\n  json: {\n    has_alerts: true,\n    message: message,\n    count: insights.length\n  }\n};"
+      },
+      "id": "format-telegram",
+      "name": "Format Telegram Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2660, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-alerts",
+              "leftValue": "={{ $json.has_alerts }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-alerts",
+      "name": "Has Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2880, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send Telegram Alerts",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [3100, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Life OS Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/cleanup_old_insights",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{ \"days_old\": 30 }",
+        "options": {}
+      },
+      "id": "cleanup-old-insights",
+      "name": "Cleanup Old Insights",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3100, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/update_insight_sync_status",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"p_records_synced\": {{ $('Collect All Findings').all().length }} }",
+        "options": {}
+      },
+      "id": "update-sync-status",
+      "name": "Update Sync Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3320, 300]
+    },
+    {
+      "parameters": {},
+      "id": "no-op-end",
+      "name": "End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [3540, 400]
+    },
+    {
+      "parameters": {},
+      "id": "no-findings-end",
+      "name": "No Findings End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1340, 600]
+    }
+  ],
+  "connections": {
+    "Daily 22:00 Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Expiring Loan Rates",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get 10-Year Tax Properties",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Low Balance Accounts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Struggling Habits",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Health Trends",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Position Alerts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Due Invoices",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Expiring Tenant Contracts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Expiring Loan Rates": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get 10-Year Tax Properties": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Low Balance Accounts": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Struggling Habits": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Health Trends": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Position Alerts": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Due Invoices": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Expiring Tenant Contracts": {
+      "main": [
+        [
+          {
+            "node": "Collect All Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect All Findings": {
+      "main": [
+        [
+          {
+            "node": "Has Findings?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Findings?": {
+      "main": [
+        [
+          {
+            "node": "Batch Findings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Findings End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Findings": {
+      "main": [
+        [
+          {
+            "node": "Generate AI Insight",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate AI Insight": {
+      "main": [
+        [
+          {
+            "node": "Prepare Insight Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Insight Data": {
+      "main": [
+        [
+          {
+            "node": "Insert Insight",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Insight": {
+      "main": [
+        [
+          {
+            "node": "All Done?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "All Done?": {
+      "main": [
+        [
+          {
+            "node": "Get High Priority Insights",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Batch Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get High Priority Insights": {
+      "main": [
+        [
+          {
+            "node": "Format Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "Has Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Alerts?": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cleanup Old Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Alerts": {
+      "main": [
+        [
+          {
+            "node": "Cleanup Old Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleanup Old Insights": {
+      "main": [
+        [
+          {
+            "node": "Update Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sync Status": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "2",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "life-os"
+  },
+  "tags": [
+    {
+      "name": "ai-copilot",
+      "id": "ai-copilot-tag"
+    },
+    {
+      "name": "insights",
+      "id": "insights-tag"
+    },
+    {
+      "name": "daily",
+      "id": "daily-tag"
+    }
+  ],
+  "pinData": {},
+  "staticData": null,
+  "triggerCount": 0
+}

@@ -1,0 +1,357 @@
+# Life OS - Caddyfile
+# Domain: life-os.fwanner.de with Subdomains
+# Automatic HTTPS via Let's Encrypt
+
+# ═══════════════════════════════════════════════════════════════
+# GLOBAL OPTIONS
+# ═══════════════════════════════════════════════════════════════
+{
+	# Email für Let's Encrypt Zertifikate
+	email admin@fwanner.de
+
+	# Admin API deaktivieren (Sicherheit)
+	admin off
+}
+
+# ═══════════════════════════════════════════════════════════════
+# LOCALHOST - Development Access
+# ═══════════════════════════════════════════════════════════════
+
+# ───────────────────────────────────────────────────────────────
+# Frontend Dashboard
+# http://localhost or http://dashboard.localhost
+# ───────────────────────────────────────────────────────────────
+:80 {
+	reverse_proxy frontend:80
+
+	encode gzip zstd
+
+	header {
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}
+
+http://dashboard.localhost {
+	reverse_proxy frontend:80
+
+	encode gzip zstd
+
+	header {
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# n8n Workflow Automation
+# http://n8n.localhost
+# ───────────────────────────────────────────────────────────────
+http://n8n.localhost {
+	reverse_proxy n8n:5678
+
+	# WebSocket Support für n8n
+	@websockets {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	reverse_proxy @websockets n8n:5678
+
+	header {
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# Supabase API (Kong Gateway)
+# http://api.localhost
+# ───────────────────────────────────────────────────────────────
+http://api.localhost {
+	reverse_proxy supabase-kong:8000
+
+	# CORS Headers
+	header {
+		Access-Control-Allow-Origin *
+		Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info, x-supabase-api-version, content-profile, prefer, range"
+		Access-Control-Max-Age 86400
+		-Server
+	}
+
+	# Handle preflight requests
+	@options method OPTIONS
+	respond @options 204
+}
+
+# ───────────────────────────────────────────────────────────────
+# Supabase Studio (Admin Dashboard)
+# http://studio.localhost
+# ───────────────────────────────────────────────────────────────
+http://studio.localhost {
+	reverse_proxy supabase-studio:3000
+
+	header {
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# Docling Document Processing UI
+# http://docling.localhost
+# ───────────────────────────────────────────────────────────────
+http://docling.localhost {
+	reverse_proxy docling:5001
+
+	header {
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# Portainer Docker Management
+# http://portainer.localhost
+# ───────────────────────────────────────────────────────────────
+http://portainer.localhost {
+	reverse_proxy portainer:9000
+
+	header {
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}
+
+# ═══════════════════════════════════════════════════════════════
+# PRODUCTION - life-os.fwanner.de
+# ═══════════════════════════════════════════════════════════════
+
+# ───────────────────────────────────────────────────────────────
+# Frontend Dashboard
+# https://dashboard.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+dashboard.life-os.fwanner.de {
+	reverse_proxy frontend:80
+
+	encode gzip zstd
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		-Server
+	}
+
+	log {
+		output file /data/logs/frontend.log
+		format json
+	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# Main Domain Redirect
+# https://life-os.fwanner.de -> dashboard.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+life-os.fwanner.de {
+	redir https://dashboard.life-os.fwanner.de{uri} permanent
+}
+
+# ───────────────────────────────────────────────────────────────
+# n8n Workflow Automation
+# https://n8n.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+n8n.life-os.fwanner.de {
+	reverse_proxy n8n:5678
+
+	# WebSocket Support für n8n
+	@websockets {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	reverse_proxy @websockets n8n:5678
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output file /data/logs/n8n.log
+		format json
+	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# Supabase API (Kong Gateway)
+# https://api.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+api.life-os.fwanner.de {
+	# Handle preflight OPTIONS requests first
+	@options method OPTIONS
+	handle @options {
+		header {
+			Access-Control-Allow-Origin "https://dashboard.life-os.fwanner.de"
+			Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD"
+			Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info, x-supabase-api-version, content-profile, accept-profile, prefer, range, Accept, X-Upsert"
+			Access-Control-Allow-Credentials "true"
+			Access-Control-Max-Age "86400"
+		}
+		respond 204
+	}
+
+	# All other requests
+	handle {
+		reverse_proxy supabase-kong:8000
+
+		header {
+			Access-Control-Allow-Origin "https://dashboard.life-os.fwanner.de"
+			Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD"
+			Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info, x-supabase-api-version, content-profile, accept-profile, prefer, range, Accept, X-Upsert"
+			Access-Control-Allow-Credentials "true"
+			Access-Control-Expose-Headers "Content-Range, X-Total-Count"
+			Strict-Transport-Security "max-age=31536000; includeSubDomains"
+			-Server
+		}
+	}
+
+	log {
+		output file /data/logs/api.log
+		format json
+	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# Supabase Studio (Admin Dashboard) - PROTECTED
+# https://studio.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+studio.life-os.fwanner.de {
+	# Basic Auth Protection
+	basic_auth {
+		admin $2a$14$ROapG9XcmIFVj/NU/TIc9.HKaWL9lxa2/ifwMMAxgAONXGuQZdupq
+	}
+
+	reverse_proxy supabase-studio:3000
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output file /data/logs/studio.log
+		format json
+	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# Supabase Storage
+# https://storage.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+storage.life-os.fwanner.de {
+	reverse_proxy supabase-storage:5000
+
+	# Erhöhtes Upload-Limit (100MB)
+	request_body {
+		max_size 100MB
+	}
+
+	header {
+		Access-Control-Allow-Origin *
+		Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+		Access-Control-Allow-Headers "Authorization, Content-Type, apikey, x-client-info, x-supabase-api-version, content-profile, prefer, range"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output file /data/logs/storage.log
+		format json
+	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# Supabase Realtime (WebSocket)
+# https://realtime.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+realtime.life-os.fwanner.de {
+	reverse_proxy supabase-realtime:4000
+
+	# WebSocket Support
+	@websockets {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	reverse_proxy @websockets supabase-realtime:4000
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output file /data/logs/realtime.log
+		format json
+	}
+}
+
+# ───────────────────────────────────────────────────────────────
+# Docling Document Processing UI - PROTECTED
+# https://docling.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────
+# Portainer Docker Management - PROTECTED
+# https://portainer.life-os.fwanner.de
+# ───────────────────────────────────────────────────────────────
+portainer.life-os.fwanner.de {
+	# Basic Auth Protection (wie Studio)
+	basic_auth {
+		admin $2a$14$ROapG9XcmIFVj/NU/TIc9.HKaWL9lxa2/ifwMMAxgAONXGuQZdupq
+	}
+
+	reverse_proxy portainer:9000
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output file /data/logs/portainer.log
+		format json
+	}
+}
+
+docling.life-os.fwanner.de {
+	# Basic Auth Protection (wie Studio)
+	basic_auth {
+		admin $2a$14$ROapG9XcmIFVj/NU/TIc9.HKaWL9lxa2/ifwMMAxgAONXGuQZdupq
+	}
+
+	reverse_proxy docling:5001
+
+	# Erhöhtes Upload-Limit (100MB)
+	request_body {
+		max_size 100MB
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output file /data/logs/docling.log
+		format json
+	}
+}

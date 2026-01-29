@@ -1,0 +1,344 @@
+{
+  "name": "21 - Index Document",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "index-document",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "index-document"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse incoming document data\nconst payload = $input.first().json;\n\nconst document = {\n  id: payload.document_id || payload.id || `doc_${Date.now()}`,\n  file_name: payload.file_name || payload.fileName || 'unknown.pdf',\n  file_url: payload.file_url || payload.fileUrl,\n  mime_type: payload.mime_type || payload.mimeType || 'application/pdf',\n  metadata: payload.metadata || {}\n};\n\nif (!document.file_url) {\n  throw new Error('file_url is required');\n}\n\nreturn [{ json: document }];"
+      },
+      "id": "parse-payload",
+      "name": "Parse Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.file_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "download-file",
+      "name": "Download File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract text from PDF using pdf-parse or similar\n// Note: In production, you'd use a proper PDF parser\n// This is a placeholder that assumes text is provided or uses a parsing service\n\nconst doc = $('Parse Payload').first().json;\nconst fileData = $input.first();\n\n// For now, we'll assume the text was provided or return placeholder\nlet extractedText = doc.metadata?.text || '';\n\nif (!extractedText && doc.metadata?.ocr_text) {\n  extractedText = doc.metadata.ocr_text;\n}\n\n// If no text available, we'd need to use a PDF parsing service\nif (!extractedText) {\n  extractedText = 'PDF text extraction required. Please provide OCR text in metadata.';\n}\n\nreturn [{\n  json: {\n    ...doc,\n    extracted_text: extractedText,\n    text_length: extractedText.length\n  }\n}];"
+      },
+      "id": "extract-text",
+      "name": "Extract Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Split text into chunks for embedding\nconst doc = $input.first().json;\nconst text = doc.extracted_text || '';\n\nconst CHUNK_SIZE = 1000; // characters\nconst CHUNK_OVERLAP = 200;\n\nconst chunks = [];\nlet start = 0;\n\nwhile (start < text.length) {\n  const end = Math.min(start + CHUNK_SIZE, text.length);\n  let chunkText = text.substring(start, end);\n  \n  // Try to end at a sentence boundary\n  if (end < text.length) {\n    const lastPeriod = chunkText.lastIndexOf('.');\n    const lastNewline = chunkText.lastIndexOf('\\n');\n    const breakPoint = Math.max(lastPeriod, lastNewline);\n    if (breakPoint > CHUNK_SIZE * 0.5) {\n      chunkText = chunkText.substring(0, breakPoint + 1);\n    }\n  }\n  \n  chunks.push({\n    document_id: doc.id,\n    chunk_index: chunks.length,\n    content: chunkText.trim(),\n    metadata: {\n      file_name: doc.file_name,\n      start_char: start,\n      end_char: start + chunkText.length\n    }\n  });\n  \n  start += chunkText.length - CHUNK_OVERLAP;\n  if (start < 0) start = 0;\n}\n\nreturn chunks.map(chunk => ({ json: chunk }));"
+      },
+      "id": "chunk-text",
+      "name": "Chunk Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"input\": \"{{ $json.content }}\",\n  \"model\": \"text-embedding-3-small\"\n}",
+        "options": {},
+        "nodeCredentialType": "openAiApi"
+      },
+      "id": "generate-embedding",
+      "name": "Generate Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1340,
+        300
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "2gJYiwjzGma3vMh1",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare data for Supabase vector storage\nconst chunk = $('Chunk Text').item;\nconst embeddingResponse = $input.first().json;\n\nconst embedding = embeddingResponse.data?.[0]?.embedding;\n\nif (!embedding) {\n  throw new Error('Failed to generate embedding');\n}\n\nreturn [{\n  json: {\n    document_id: chunk.json.document_id,\n    chunk_index: chunk.json.chunk_index,\n    content: chunk.json.content,\n    embedding: embedding,\n    metadata: chunk.json.metadata\n  }\n}];"
+      },
+      "id": "prepare-vector",
+      "name": "Prepare Vector Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "document_embeddings",
+        "columns": "document_id, chunk_index, content, embedding, metadata",
+        "options": {}
+      },
+      "id": "store-embedding",
+      "name": "Store Embedding",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "documents",
+        "columns": "id, file_name, file_url, mime_type, text_content, chunk_count, indexed_at, metadata",
+        "conflictColumns": "id",
+        "options": {}
+      },
+      "id": "update-document",
+      "name": "Update Document Record",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        500
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare document record update\nconst doc = $('Parse Payload').first().json;\nconst textData = $('Extract Text').first().json;\nconst chunks = $('Chunk Text').all();\n\nreturn [{\n  json: {\n    id: doc.id,\n    file_name: doc.file_name,\n    file_url: doc.file_url,\n    mime_type: doc.mime_type,\n    text_content: textData.extracted_text.substring(0, 10000), // Store first 10k chars\n    chunk_count: chunks.length,\n    indexed_at: new Date().toISOString(),\n    metadata: {\n      ...doc.metadata,\n      text_length: textData.text_length\n    }\n  }\n}];"
+      },
+      "id": "prepare-doc-update",
+      "name": "Prepare Doc Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"document_id\": \"{{ $('Parse Payload').first().json.id }}\",\n  \"chunks_indexed\": {{ $('Chunk Text').all().length }},\n  \"message\": \"Document indexed successfully\"\n}"
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=📄 *Dokument indexiert*\n\nDatei: {{ $('Parse Payload').first().json.file_name }}\nChunks: {{ $('Chunk Text').all().length }}\n\n✅ Bereit für Suche",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "notify-telegram",
+      "name": "Notify Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        2000,
+        500
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-creds",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Payload": {
+      "main": [
+        [
+          {
+            "node": "Download File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download File": {
+      "main": [
+        [
+          {
+            "node": "Extract Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Text": {
+      "main": [
+        [
+          {
+            "node": "Chunk Text",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Doc Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk Text": {
+      "main": [
+        [
+          {
+            "node": "Generate Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Embedding": {
+      "main": [
+        [
+          {
+            "node": "Prepare Vector Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Vector Data": {
+      "main": [
+        [
+          {
+            "node": "Store Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Embedding": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Doc Update": {
+      "main": [
+        [
+          {
+            "node": "Update Document Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "documents"
+    },
+    {
+      "name": "ai"
+    },
+    {
+      "name": "webhook"
+    }
+  ],
+  "active": false
+}

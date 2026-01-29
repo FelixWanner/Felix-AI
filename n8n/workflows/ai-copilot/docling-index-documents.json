@@ -1,0 +1,722 @@
+{
+  "name": "Docling Index Documents",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 200]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "docling-index",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 420],
+      "webhookId": "docling-index-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Rekursiv /home/node/documents scannen und Dateien mit Metadaten zurückgeben\nconst fs = require('fs');\nconst path = require('path');\nconst crypto = require('crypto');\n\nconst SUPPORTED_EXTENSIONS = {\n  '.pdf': { mime: 'application/pdf', category: 'pdf' },\n  '.docx': { mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', category: 'pdf' },\n  '.pptx': { mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', category: 'pdf' },\n  '.xlsx': { mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', category: 'pdf' },\n  '.html': { mime: 'text/html', category: 'webpage' },\n  '.htm': { mime: 'text/html', category: 'webpage' },\n  '.md': { mime: 'text/markdown', category: 'note' },\n  '.png': { mime: 'image/png', category: 'pdf' },\n  '.jpg': { mime: 'image/jpeg', category: 'pdf' },\n  '.jpeg': { mime: 'image/jpeg', category: 'pdf' },\n  '.tiff': { mime: 'image/tiff', category: 'pdf' },\n  '.bmp': { mime: 'image/bmp', category: 'pdf' }\n};\n\nconst scanDir = '/home/node/documents';\nconst items = [];\n\nfunction walkDir(dir) {\n  if (!fs.existsSync(dir)) return;\n  const entries = fs.readdirSync(dir, { withFileTypes: true });\n  for (const entry of entries) {\n    const fullPath = path.join(dir, entry.name);\n    if (entry.isDirectory()) {\n      walkDir(fullPath);\n    } else if (entry.isFile()) {\n      const ext = path.extname(entry.name).toLowerCase();\n      const typeInfo = SUPPORTED_EXTENSIONS[ext];\n      if (!typeInfo) continue;\n\n      const stats = fs.statSync(fullPath);\n      if (stats.size < 100) continue;\n\n      const fileBuffer = fs.readFileSync(fullPath);\n      const hash = crypto.createHash('sha256').update(fileBuffer).digest('hex');\n\n      items.push({\n        json: {\n          file_path: fullPath,\n          file_name: entry.name,\n          file_size: stats.size,\n          mime_type: typeInfo.mime,\n          category: typeInfo.category,\n          content_hash: hash,\n          source_type: 'upload'\n        }\n      });\n    }\n  }\n}\n\nwalkDir(scanDir);\n\nif (items.length === 0) {\n  return [{ json: { no_files: true, message: 'Keine neuen Dateien gefunden' } }];\n}\n\nreturn items;"
+      },
+      "id": "scan-directory",
+      "name": "Scan Directory",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-no-files",
+              "leftValue": "={{ $json.no_files }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "has-files",
+      "name": "Has Files?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  '{{ $json.file_path.replace(/'/g, \"''\") }}' as file_path,\n  '{{ $json.file_name.replace(/'/g, \"''\") }}' as file_name,\n  {{ $json.file_size }} as file_size,\n  '{{ $json.mime_type }}' as mime_type,\n  '{{ $json.category }}' as category,\n  '{{ $json.content_hash }}' as content_hash,\n  '{{ $json.source_type }}' as source_type,\n  CASE WHEN EXISTS(\n    SELECT 1 FROM documents WHERE content_hash = '{{ $json.content_hash }}' AND is_indexed = true\n  ) THEN true ELSE false END as is_already_indexed",
+        "options": {}
+      },
+      "id": "check-already-processed",
+      "name": "Check Already Processed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [960, 200],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "NG1j8CLMwUIHYhaW",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-indexed",
+              "leftValue": "={{ $json.is_already_indexed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "already-indexed",
+      "name": "Already Indexed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1180, 200]
+    },
+    {
+      "parameters": {},
+      "id": "skip-indexed",
+      "name": "Skip (Already Indexed)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1420, 100]
+    },
+    {
+      "parameters": {
+        "filePath": "={{ $json.file_path }}",
+        "dataPropertyName": "data"
+      },
+      "id": "read-file-binary",
+      "name": "Read File as Binary",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [1420, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://docling:5001/v1/convert/file",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "files",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "convert-docling",
+      "name": "Convert via Docling",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1640, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Markdown-Content aus Docling-Response extrahieren\nconst input = $input.first().json;\n// Datei-Metadaten aus dem Check Already Processed Node holen\nconst fileData = $('Check Already Processed').item.json;\n\n// Docling v1 Response-Struktur\nlet markdownContent = '';\n\nif (input.document && input.document.md_content) {\n  markdownContent = input.document.md_content;\n} else if (input.document && input.document.export_results && input.document.export_results.markdown) {\n  markdownContent = input.document.export_results.markdown;\n} else if (input.output && input.output.markdown) {\n  markdownContent = input.output.markdown;\n} else if (input.content) {\n  markdownContent = input.content;\n} else if (typeof input === 'string') {\n  markdownContent = input;\n} else {\n  const findMarkdown = (obj, depth = 0) => {\n    if (depth > 5 || !obj) return '';\n    if (typeof obj === 'string' && obj.length > 50) return obj;\n    if (typeof obj === 'object') {\n      for (const key of ['md_content', 'markdown', 'text', 'content', 'output']) {\n        if (obj[key] && typeof obj[key] === 'string' && obj[key].length > 50) return obj[key];\n      }\n      for (const key of Object.keys(obj)) {\n        const result = findMarkdown(obj[key], depth + 1);\n        if (result) return result;\n      }\n    }\n    return '';\n  };\n  markdownContent = findMarkdown(input);\n}\n\nif (!markdownContent || markdownContent.length < 50) {\n  return {\n    json: {\n      error: true,\n      message: `Docling: kein Content fuer ${fileData.file_name} (${markdownContent ? markdownContent.length : 0} Zeichen)`,\n      file_name: fileData.file_name\n    }\n  };\n}\n\nreturn {\n  json: {\n    file_name: fileData.file_name,\n    file_path: fileData.file_path,\n    file_size: fileData.file_size,\n    mime_type: fileData.mime_type,\n    category: fileData.category,\n    content_hash: fileData.content_hash,\n    source_type: fileData.source_type,\n    markdown_content: markdownContent,\n    content_length: markdownContent.length,\n    approx_tokens: Math.ceil(markdownContent.length / 4)\n  }\n};"
+      },
+      "id": "extract-markdown",
+      "name": "Extract Markdown",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1860, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-error",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "extraction-ok",
+      "name": "Extraction OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2080, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fehler loggen\nconst input = $input.first().json;\nconsole.error(`Docling Fehler: ${input.message || 'Unbekannter Fehler'} für Datei: ${input.file_name || 'unbekannt'}`);\nreturn { json: input };"
+      },
+      "id": "log-error",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2300, 460]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO documents (\n  title,\n  document_type,\n  category,\n  file_path,\n  file_size,\n  mime_type,\n  content_hash,\n  source_type,\n  total_tokens,\n  embedding_model,\n  embedding_dimensions,\n  is_indexed,\n  metadata\n) VALUES (\n  '{{ $json.file_name.replace(/'/g, \"''\") }}',\n  '{{ $json.category }}',\n  '{{ $json.category }}'::document_category,\n  '{{ $json.file_path.replace(/'/g, \"''\") }}',\n  {{ $json.file_size }},\n  '{{ $json.mime_type }}',\n  '{{ $json.content_hash }}',\n  '{{ $json.source_type }}',\n  {{ $json.approx_tokens }},\n  'text-embedding-3-small',\n  1536,\n  false,\n  '{}'::JSONB\n)\nRETURNING id, title",
+        "options": {}
+      },
+      "id": "insert-document",
+      "name": "Insert Document Record",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2300, 200],
+      "credentials": {
+        "postgres": {
+          "id": "NG1j8CLMwUIHYhaW",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Markdown-Text in Chunks aufteilen (500 Tokens, 50 Overlap)\nconst docRecord = $input.first().json;\nconst extractData = $('Extract Markdown').first().json;\nconst text = extractData.markdown_content;\n\nconst CHARS_PER_TOKEN = 4;\nconst CHUNK_SIZE_CHARS = 500 * CHARS_PER_TOKEN; // 2000 chars\nconst OVERLAP_CHARS = 50 * CHARS_PER_TOKEN;     // 200 chars\n\n// Markdown-aware Chunking: Zuerst nach Headings aufteilen\nconst sections = text.split(/(?=^#{1,3}\\s)/m);\nconst chunks = [];\nlet currentChunk = '';\nlet currentSection = '';\nlet chunkIndex = 0;\n\nfor (const section of sections) {\n  const headingMatch = section.match(/^(#{1,3})\\s+(.+)/m);\n  if (headingMatch) {\n    currentSection = headingMatch[2].trim();\n  }\n\n  const sentences = section.split(/(?<=[.!?])\\s+/);\n\n  for (const sentence of sentences) {\n    if (currentChunk.length + sentence.length > CHUNK_SIZE_CHARS && currentChunk.length > 0) {\n      chunks.push({\n        chunk_index: chunkIndex,\n        content: currentChunk.trim(),\n        section_title: currentSection,\n        char_count: currentChunk.length,\n        approx_tokens: Math.ceil(currentChunk.length / CHARS_PER_TOKEN)\n      });\n\n      const overlapStart = Math.max(0, currentChunk.length - OVERLAP_CHARS);\n      currentChunk = currentChunk.substring(overlapStart) + ' ' + sentence;\n      chunkIndex++;\n    } else {\n      currentChunk += (currentChunk ? ' ' : '') + sentence;\n    }\n  }\n}\n\nif (currentChunk.trim().length > 0) {\n  chunks.push({\n    chunk_index: chunkIndex,\n    content: currentChunk.trim(),\n    section_title: currentSection,\n    char_count: currentChunk.length,\n    approx_tokens: Math.ceil(currentChunk.length / CHARS_PER_TOKEN)\n  });\n}\n\nreturn {\n  json: {\n    document_id: docRecord.id,\n    title: docRecord.title,\n    total_chunks: chunks.length,\n    chunks: chunks\n  }\n};"
+      },
+      "id": "chunk-markdown",
+      "name": "Chunk Markdown (500 tokens, 50 overlap)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2520, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Chunks in einzelne Items aufteilen für paralleles Embedding\nconst data = $input.first().json;\n\nif (data.error) {\n  return [{ json: data }];\n}\n\nconst items = data.chunks.map(chunk => ({\n  json: {\n    document_id: data.document_id,\n    title: data.title,\n    chunk_index: chunk.chunk_index,\n    content: chunk.content,\n    section_title: chunk.section_title,\n    total_chunks: data.total_chunks,\n    approx_tokens: chunk.approx_tokens\n  }\n}));\n\nreturn items;"
+      },
+      "id": "split-chunks",
+      "name": "Split Into Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2740, 200]
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "id": "batch-chunks",
+      "name": "Batch Chunks",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [2960, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"text-embedding-3-small\",\n  \"input\": {{ JSON.stringify($json.content) }},\n  \"dimensions\": 1536\n}",
+        "options": {}
+      },
+      "id": "create-embedding",
+      "name": "Create OpenAI Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3180, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "2gJYiwjzGma3vMh1",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Chunk-Daten mit Embedding kombinieren\nconst chunkData = $('Batch Chunks').first().json;\nconst embeddingResponse = $input.first().json;\n\nif (!embeddingResponse.data || !embeddingResponse.data[0]) {\n  return { json: { error: 'Kein Embedding von OpenAI erhalten' } };\n}\n\nconst embedding = embeddingResponse.data[0].embedding;\n\nreturn {\n  json: {\n    document_id: chunkData.document_id,\n    chunk_index: chunkData.chunk_index,\n    content: chunkData.content,\n    section_title: chunkData.section_title || '',\n    approx_tokens: chunkData.approx_tokens || 0,\n    embedding: `[${embedding.join(',')}]`,\n    metadata: JSON.stringify({\n      title: chunkData.title,\n      total_chunks: chunkData.total_chunks,\n      section_title: chunkData.section_title || ''\n    })\n  }\n};"
+      },
+      "id": "prepare-embedding-data",
+      "name": "Prepare Embedding Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3400, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO document_embeddings (\n  document_id,\n  chunk_index,\n  content,\n  embedding,\n  section_title,\n  chunk_type,\n  token_count,\n  metadata\n) VALUES (\n  '{{ $json.document_id }}'::UUID,\n  {{ $json.chunk_index }},\n  $content${{ $json.content }}$content$,\n  '{{ $json.embedding }}'::vector(1536),\n  {{ $json.section_title ? \"$stitle$\" + $json.section_title + \"$stitle$\" : 'NULL' }},\n  'standard'::chunk_type,\n  {{ $json.approx_tokens }},\n  '{{ $json.metadata }}'::JSONB\n)\nON CONFLICT (document_id, chunk_index) DO UPDATE SET\n  content = EXCLUDED.content,\n  embedding = EXCLUDED.embedding,\n  section_title = EXCLUDED.section_title,\n  metadata = EXCLUDED.metadata",
+        "options": {}
+      },
+      "id": "insert-embedding",
+      "name": "Insert Embedding",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3620, 200],
+      "credentials": {
+        "postgres": {
+          "id": "NG1j8CLMwUIHYhaW",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-done",
+              "leftValue": "={{ $('Batch Chunks').first().context.noItemsLeft }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "all-chunks-done",
+      "name": "All Chunks Done?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [3840, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE documents \nSET \n  is_indexed = true,\n  total_chunks = {{ $('Chunk Markdown (500 tokens, 50 overlap)').first().json.total_chunks }},\n  embedding_model = 'text-embedding-3-small',\n  embedding_dimensions = 1536,\n  updated_at = NOW()\nWHERE id = '{{ $('Insert Document Record').first().json.id }}'::UUID\nRETURNING id, title, is_indexed, total_chunks",
+        "options": {}
+      },
+      "id": "mark-indexed",
+      "name": "Mark Document Indexed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [4060, 100],
+      "credentials": {
+        "postgres": {
+          "id": "NG1j8CLMwUIHYhaW",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Docling Indexierung abgeschlossen\",\n  \"document_id\": \"{{ $('Insert Document Record').first().json.id }}\",\n  \"title\": \"{{ $('Insert Document Record').first().json.title }}\",\n  \"chunks_created\": {{ $('Chunk Markdown (500 tokens, 50 overlap)').first().json.total_chunks }}\n}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [4280, 100]
+    },
+    {
+      "parameters": {},
+      "id": "no-op-end",
+      "name": "End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [4500, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": false,\n  \"message\": \"Keine neuen Dateien in /root/documents gefunden\"\n}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-no-files",
+      "name": "Respond No Files",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [960, 420]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Scan Directory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Scan Directory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scan Directory": {
+      "main": [
+        [
+          {
+            "node": "Has Files?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Files?": {
+      "main": [
+        [
+          {
+            "node": "Respond No Files",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Already Processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond No Files": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Already Processed": {
+      "main": [
+        [
+          {
+            "node": "Already Indexed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already Indexed?": {
+      "main": [
+        [
+          {
+            "node": "Skip (Already Indexed)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read File as Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip (Already Indexed)": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read File as Binary": {
+      "main": [
+        [
+          {
+            "node": "Convert via Docling",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert via Docling": {
+      "main": [
+        [
+          {
+            "node": "Extract Markdown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Markdown": {
+      "main": [
+        [
+          {
+            "node": "Extraction OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraction OK?": {
+      "main": [
+        [
+          {
+            "node": "Insert Document Record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Error": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Document Record": {
+      "main": [
+        [
+          {
+            "node": "Chunk Markdown (500 tokens, 50 overlap)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk Markdown (500 tokens, 50 overlap)": {
+      "main": [
+        [
+          {
+            "node": "Split Into Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Into Items": {
+      "main": [
+        [
+          {
+            "node": "Batch Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Chunks": {
+      "main": [
+        [
+          {
+            "node": "Create OpenAI Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create OpenAI Embedding": {
+      "main": [
+        [
+          {
+            "node": "Prepare Embedding Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Embedding Data": {
+      "main": [
+        [
+          {
+            "node": "Insert Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Embedding": {
+      "main": [
+        [
+          {
+            "node": "All Chunks Done?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "All Chunks Done?": {
+      "main": [
+        [
+          {
+            "node": "Mark Document Indexed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Batch Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Document Indexed": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Success": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "2",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "life-os"
+  },
+  "tags": [
+    {
+      "name": "ai-copilot",
+      "id": "ai-copilot-tag"
+    },
+    {
+      "name": "rag",
+      "id": "rag-tag"
+    },
+    {
+      "name": "documents",
+      "id": "documents-tag"
+    },
+    {
+      "name": "docling",
+      "id": "docling-tag"
+    }
+  ],
+  "pinData": {},
+  "staticData": null,
+  "triggerCount": 0
+}

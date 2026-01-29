@@ -1,0 +1,216 @@
+{
+  "name": "01 - Sync BHB Accounts",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 6
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 06:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://app.buchhaltungsbutler.de/api/v1/accounts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "bhb-api",
+      "name": "Fetch BHB Accounts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "gjCumEHDYs8nby9J",
+          "name": "Buchhaltungsbutler"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Transform BHB accounts to Supabase accounts table format\nconst accounts = $input.all();\nconst transformed = [];\n\nfor (const item of accounts) {\n  const data = item.json.data || [item.json];\n  \n  for (const account of data) {\n    transformed.push({\n      json: {\n        bhb_account_id: account.id.toString(),\n        name: account.name,\n        account_type: mapAccountType(account.type),\n        iban: account.iban || null,\n        current_balance: parseFloat(account.balance) || 0,\n        is_active: true,\n        last_synced_at: new Date().toISOString(),\n        notes: `BHB Type: ${account.type}, Currency: ${account.currency || 'EUR'}`\n      }\n    });\n  }\n}\n\nfunction mapAccountType(bhbType) {\n  const mapping = {\n    'bank': 'checking',\n    'cash': 'cash',\n    'credit_card': 'credit_card',\n    'savings': 'savings',\n    'loan': 'loan'\n  };\n  return mapping[bhbType] || 'checking';\n}\n\nreturn transformed;"
+      },
+      "id": "transform-data",
+      "name": "Transform Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "accounts",
+        "columns": "bhb_account_id, name, account_type, iban, current_balance, is_active, last_synced_at",
+        "conflictColumns": "bhb_account_id",
+        "options": {}
+      },
+      "id": "supabase-upsert",
+      "name": "Upsert to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Update sync status\nconst itemCount = $input.all().length;\n\nreturn [{\n  json: {\n    source: 'buchhaltungsbutler',\n    last_sync_at: new Date().toISOString(),\n    last_sync_status: 'success',\n    items_synced: itemCount\n  }\n}];"
+      },
+      "id": "prepare-status",
+      "name": "Prepare Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "sync_status",
+        "columns": "source, last_sync_at, last_sync_status, items_synced",
+        "conflictColumns": "source",
+        "options": {}
+      },
+      "id": "update-sync-status",
+      "name": "Update Sync Status",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "errorMessage": "BHB Account Sync failed"
+      },
+      "id": "error-handler",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        900,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Daily 06:00": {
+      "main": [
+        [
+          {
+            "node": "Fetch BHB Accounts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch BHB Accounts": {
+      "main": [
+        [
+          {
+            "node": "Transform Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Data": {
+      "main": [
+        [
+          {
+            "node": "Upsert to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Status": {
+      "main": [
+        [
+          {
+            "node": "Update Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "wealth"
+    },
+    {
+      "name": "sync"
+    }
+  ],
+  "triggerCount": 1,
+  "active": false
+}

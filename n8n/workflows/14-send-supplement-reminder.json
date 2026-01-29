@@ -1,0 +1,282 @@
+{
+  "name": "14 - Send Supplement Reminder",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "supplements",
+        "columns": "id, name, dosage, dosage_unit, frequency, time_of_day, is_active, notes",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "is_active",
+              "keyValue": "true"
+            }
+          ]
+        },
+        "options": {
+          "returnAll": true
+        }
+      },
+      "id": "get-supplements",
+      "name": "Get Active Supplements",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "supplement_cycles",
+        "columns": "supplement_id, cycle_on_days, cycle_off_days, current_day, is_on_cycle",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "is_active",
+              "keyValue": "true"
+            }
+          ]
+        },
+        "options": {
+          "returnAll": true
+        }
+      },
+      "id": "get-cycles",
+      "name": "Get Active Cycles",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        460,
+        500
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter supplements for today\nconst supplements = $('Get Active Supplements').all();\nconst cycles = $('Get Active Cycles').all();\n\nconst now = new Date();\nconst currentHour = now.getHours();\nconst dayOfWeek = now.getDay(); // 0 = Sunday\n\n// Build cycle map\nconst cycleMap = new Map();\nfor (const cycle of cycles) {\n  cycleMap.set(cycle.json.supplement_id, cycle.json);\n}\n\nconst morningSupps = [];\nconst eveningSupps = [];\nconst allDaySupps = [];\n\nfor (const suppItem of supplements) {\n  const supp = suppItem.json;\n  \n  // Check if on cycle\n  const cycle = cycleMap.get(supp.id);\n  if (cycle && !cycle.is_on_cycle) {\n    continue; // Skip if currently in off-cycle\n  }\n  \n  // Check frequency\n  if (supp.frequency === 'weekdays' && (dayOfWeek === 0 || dayOfWeek === 6)) {\n    continue;\n  }\n  if (supp.frequency === 'weekends' && dayOfWeek >= 1 && dayOfWeek <= 5) {\n    continue;\n  }\n  if (supp.frequency === 'every_other_day' && now.getDate() % 2 !== 0) {\n    continue;\n  }\n  \n  const suppData = {\n    id: supp.id,\n    name: supp.name,\n    dosage: `${supp.dosage} ${supp.dosage_unit}`,\n    notes: supp.notes\n  };\n  \n  // Sort by time of day\n  switch (supp.time_of_day) {\n    case 'morning':\n      morningSupps.push(suppData);\n      break;\n    case 'evening':\n      eveningSupps.push(suppData);\n      break;\n    default:\n      allDaySupps.push(suppData);\n  }\n}\n\n// Determine which reminders to send based on current time\nlet suppsToRemind = [];\nlet reminderType = '';\n\nif (currentHour >= 6 && currentHour < 10) {\n  suppsToRemind = [...morningSupps, ...allDaySupps];\n  reminderType = 'morning';\n} else if (currentHour >= 18 && currentHour < 22) {\n  suppsToRemind = [...eveningSupps];\n  reminderType = 'evening';\n}\n\nreturn [{\n  json: {\n    reminder_type: reminderType,\n    supplements: suppsToRemind,\n    count: suppsToRemind.length,\n    morning_count: morningSupps.length,\n    evening_count: eveningSupps.length,\n    date: now.toISOString()\n  }\n}];"
+      },
+      "id": "filter-supplements",
+      "name": "Filter for Today",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        740,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.count }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "has-supplements",
+      "name": "Has Supplements?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        960,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Telegram reminder\nconst data = $input.first().json;\n\nconst timeEmoji = data.reminder_type === 'morning' ? '🌅' : '🌙';\nconst timeLabel = data.reminder_type === 'morning' ? 'Morgen' : 'Abend';\n\nlet message = `${timeEmoji} *${timeLabel}s-Supplemente*\\n\\n`;\n\nfor (const supp of data.supplements) {\n  message += `💊 *${supp.name}*\\n`;\n  message += `   ${supp.dosage}\\n`;\n  if (supp.notes) {\n    message += `   _${supp.notes}_\\n`;\n  }\n  message += `\\n`;\n}\n\nmessage += `━━━━━━━━━━━━━━━━━━\\n`;\nmessage += `Tippe /sup <name> wenn eingenommen`;\n\n// Create inline keyboard for quick logging\nconst keyboard = data.supplements.slice(0, 4).map(s => ({\n  text: `✓ ${s.name}`,\n  callback_data: `sup_taken_${s.id}`\n}));\n\nreturn [{\n  json: {\n    message: message,\n    parse_mode: 'Markdown',\n    keyboard: keyboard\n  }\n}];"
+      },
+      "id": "prepare-message",
+      "name": "Prepare Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "reply_markup": {
+            "inline_keyboard": [
+              "={{ $json.keyboard }}"
+            ]
+          }
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send Reminder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1400,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-creds",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "telegram_reminders",
+        "columns": "reminder_type, content, sent_at, supplements",
+        "options": {}
+      },
+      "id": "log-reminder",
+      "name": "Log Reminder",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1180,
+        500
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 07:00": {
+      "main": [
+        [
+          {
+            "node": "Get Active Supplements",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Active Cycles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Supplements": {
+      "main": [
+        [
+          {
+            "node": "Filter for Today",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Cycles": {
+      "main": [
+        [
+          {
+            "node": "Filter for Today",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter for Today": {
+      "main": [
+        [
+          {
+            "node": "Has Supplements?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Supplements?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Prepare Message": {
+      "main": [
+        [
+          {
+            "node": "Send Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "health"
+    },
+    {
+      "name": "reminder"
+    }
+  ],
+  "active": false
+}

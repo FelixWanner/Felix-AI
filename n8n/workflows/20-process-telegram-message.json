@@ -1,0 +1,411 @@
+{
+  "name": "20 - Process Telegram Message",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telegram",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Telegram Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        400
+      ],
+      "webhookId": "telegram"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse incoming Telegram message\nconst update = $input.first().json;\n\nconst message = update.message || update.edited_message;\nconst callback = update.callback_query;\n\nif (callback) {\n  // Handle callback from inline keyboard\n  return [{\n    json: {\n      type: 'callback',\n      callback_id: callback.id,\n      data: callback.data,\n      chat_id: callback.message.chat.id,\n      user_id: callback.from.id,\n      message_id: callback.message.message_id\n    }\n  }];\n}\n\nif (!message) {\n  return [{ json: { type: 'unknown', skip: true } }];\n}\n\nconst text = message.text || '';\nconst voice = message.voice;\nconst isCommand = text.startsWith('/');\n\nlet command = null;\nlet args = '';\n\nif (isCommand) {\n  const parts = text.split(' ');\n  command = parts[0].substring(1).toLowerCase();\n  args = parts.slice(1).join(' ');\n}\n\nreturn [{\n  json: {\n    type: voice ? 'voice' : (isCommand ? 'command' : 'text'),\n    chat_id: message.chat.id,\n    user_id: message.from.id,\n    username: message.from.username,\n    first_name: message.from.first_name,\n    message_id: message.message_id,\n    text: text,\n    command: command,\n    args: args,\n    voice: voice ? {\n      file_id: voice.file_id,\n      duration: voice.duration,\n      mime_type: voice.mime_type\n    } : null,\n    timestamp: new Date(message.date * 1000).toISOString()\n  }\n}];"
+      },
+      "id": "parse-message",
+      "name": "Parse Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.type }}",
+              "value2": "command"
+            }
+          ]
+        }
+      },
+      "id": "is-command",
+      "name": "Is Command?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        680,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.type }}",
+              "value2": "voice"
+            }
+          ]
+        }
+      },
+      "id": "is-voice",
+      "name": "Is Voice?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        680,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Route command to appropriate handler\nconst data = $input.first().json;\nconst cmd = data.command;\n\n// Command categories\nconst quickCapture = ['task', 'note', 'expense', 'weight', 'mood', 'water', 'habit', 'sup'];\nconst quickView = ['today', 'inbox', 'balance', 'networth', 'habits', 'workout', 'energy', 'goals'];\n\nlet category = 'unknown';\nif (quickCapture.includes(cmd)) category = 'capture';\nelse if (quickView.includes(cmd)) category = 'view';\n\nreturn [{\n  json: {\n    ...data,\n    category: category\n  }\n}];"
+      },
+      "id": "route-command",
+      "name": "Route Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getFile",
+        "fileId": "={{ $json.voice.file_id }}"
+      },
+      "id": "get-voice-file",
+      "name": "Get Voice File",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        600
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-creds",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/audio/transcriptions",
+        "authentication": "predefinedCredentialType",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "model",
+              "value": "whisper-1"
+            },
+            {
+              "name": "language",
+              "value": "de"
+            }
+          ]
+        },
+        "nodeCredentialType": "openAiApi"
+      },
+      "id": "transcribe-voice",
+      "name": "Transcribe with Whisper",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1120,
+        600
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "2gJYiwjzGma3vMh1",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Du bist ein Intent-Erkennungs-System für einen persönlichen Assistenten. Analysiere die Eingabe und extrahiere:\n1. intent: task, expense, weight, mood, water, habit, supplement, query_balance, query_networth, query_today, query_inbox, query_habits, query_workout, query_energy, query_goals, reminder, note, unknown\n2. entities: Relevante Daten wie Betrag, Kategorie, Text, Datum, etc.\n\nAntworte NUR mit einem JSON-Objekt."
+            },
+            {
+              "role": "user",
+              "content": "={{ $json.text || $('Transcribe with Whisper').first().json.text }}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 200,
+          "temperature": 0
+        }
+      },
+      "id": "detect-intent",
+      "name": "Detect Intent (GPT)",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.3,
+      "position": [
+        1120,
+        800
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "2gJYiwjzGma3vMh1",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle quick capture commands\nconst data = $input.first().json;\nconst cmd = data.command;\nconst args = data.args;\nconst chatId = data.chat_id;\n\nlet response = { success: false, message: '' };\nlet dbAction = null;\n\nswitch (cmd) {\n  case 'task':\n    if (!args) {\n      response.message = '❌ Bitte gib eine Aufgabe an: /task <text>';\n    } else {\n      dbAction = {\n        table: 'inbox_items',\n        data: {\n          source: 'telegram',\n          source_id: `tg_${Date.now()}`,\n          item_type: 'task',\n          title: args,\n          status: 'pending',\n          priority: 'medium'\n        }\n      };\n      response.success = true;\n      response.message = `✅ Task erstellt: ${args}`;\n    }\n    break;\n    \n  case 'expense':\n    const expMatch = args.match(/^([\\d.,]+)\\s*(.*)$/);\n    if (!expMatch) {\n      response.message = '❌ Format: /expense <betrag> <kategorie>';\n    } else {\n      const amount = parseFloat(expMatch[1].replace(',', '.'));\n      const category = expMatch[2] || 'Sonstiges';\n      dbAction = {\n        table: 'transactions',\n        data: {\n          date: new Date().toISOString().split('T')[0],\n          amount: -amount,\n          category: category,\n          transaction_type: 'expense',\n          description: `Via Telegram: ${category}`,\n          source: 'telegram'\n        }\n      };\n      response.success = true;\n      response.message = `✅ Ausgabe: €${amount.toFixed(2)} für ${category}`;\n    }\n    break;\n    \n  case 'weight':\n    const weight = parseFloat(args.replace(',', '.'));\n    if (isNaN(weight)) {\n      response.message = '❌ Format: /weight <kg>';\n    } else {\n      dbAction = {\n        table: 'health_logs',\n        data: {\n          date: new Date().toISOString().split('T')[0],\n          metric: 'weight',\n          value: weight,\n          unit: 'kg'\n        }\n      };\n      response.success = true;\n      response.message = `✅ Gewicht: ${weight} kg`;\n    }\n    break;\n    \n  case 'mood':\n    const mood = parseInt(args);\n    if (isNaN(mood) || mood < 1 || mood > 10) {\n      response.message = '❌ Format: /mood <1-10>';\n    } else {\n      dbAction = {\n        table: 'daily_logs',\n        data: {\n          date: new Date().toISOString().split('T')[0],\n          mood_score: mood\n        }\n      };\n      response.success = true;\n      response.message = `✅ Stimmung: ${mood}/10 ${'😊'.repeat(Math.ceil(mood/2))}`;\n    }\n    break;\n    \n  case 'water':\n    const water = parseInt(args);\n    if (isNaN(water)) {\n      response.message = '❌ Format: /water <ml>';\n    } else {\n      dbAction = {\n        table: 'health_logs',\n        data: {\n          date: new Date().toISOString().split('T')[0],\n          metric: 'water',\n          value: water,\n          unit: 'ml'\n        }\n      };\n      response.success = true;\n      response.message = `✅ Wasser: ${water} ml 💧`;\n    }\n    break;\n    \n  case 'habit':\n    if (!args) {\n      response.message = '❌ Format: /habit <name>';\n    } else {\n      dbAction = {\n        table: 'habit_logs',\n        data: {\n          habit_name: args,\n          completed_at: new Date().toISOString()\n        }\n      };\n      response.success = true;\n      response.message = `✅ Habit erledigt: ${args} ⭐`;\n    }\n    break;\n    \n  case 'sup':\n    if (!args) {\n      response.message = '❌ Format: /sup <name>';\n    } else {\n      dbAction = {\n        table: 'supplement_logs',\n        data: {\n          supplement_name: args,\n          taken_at: new Date().toISOString()\n        }\n      };\n      response.success = true;\n      response.message = `✅ Supplement: ${args} 💊`;\n    }\n    break;\n    \n  case 'note':\n    if (!args) {\n      response.message = '❌ Format: /note <text>';\n    } else {\n      dbAction = {\n        table: 'inbox_items',\n        data: {\n          source: 'telegram',\n          source_id: `tg_note_${Date.now()}`,\n          item_type: 'note',\n          title: args.substring(0, 100),\n          content: args,\n          status: 'pending'\n        }\n      };\n      response.success = true;\n      response.message = `✅ Notiz gespeichert 📝`;\n    }\n    break;\n    \n  default:\n    response.message = `❓ Unbekannter Befehl: /${cmd}`;\n}\n\nreturn [{\n  json: {\n    ...data,\n    response: response,\n    db_action: dbAction\n  }\n}];"
+      },
+      "id": "handle-capture",
+      "name": "Handle Capture Commands",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle quick view commands\nconst data = $input.first().json;\nconst cmd = data.command;\n\n// This node prepares the query - actual data fetching happens in subsequent nodes\nlet query = null;\n\nswitch (cmd) {\n  case 'today':\n    query = { type: 'today_overview' };\n    break;\n  case 'inbox':\n    query = { type: 'inbox_items', limit: 10 };\n    break;\n  case 'balance':\n    query = { type: 'account_balances' };\n    break;\n  case 'networth':\n    query = { type: 'net_worth' };\n    break;\n  case 'habits':\n    query = { type: 'habits_today' };\n    break;\n  case 'workout':\n    query = { type: 'workout_today' };\n    break;\n  case 'energy':\n    query = { type: 'garmin_stats' };\n    break;\n  case 'goals':\n    query = { type: 'goal_progress' };\n    break;\n}\n\nreturn [{\n  json: {\n    ...data,\n    query: query\n  }\n}];"
+      },
+      "id": "handle-view",
+      "name": "Prepare View Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.response?.message || 'Verarbeitet!' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-response",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1560,
+        400
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-creds",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "telegram_messages",
+        "columns": "chat_id, user_id, message_type, content, intent, processed_at",
+        "options": {}
+      },
+      "id": "log-message",
+      "name": "Log Message",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        600
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Message": {
+      "main": [
+        [
+          {
+            "node": "Is Command?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is Voice?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Command?": {
+      "main": [
+        [
+          {
+            "node": "Route Command",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Detect Intent (GPT)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Voice?": {
+      "main": [
+        [
+          {
+            "node": "Get Voice File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Route Command": {
+      "main": [
+        [
+          {
+            "node": "Handle Capture Commands",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare View Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Voice File": {
+      "main": [
+        [
+          {
+            "node": "Transcribe with Whisper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe with Whisper": {
+      "main": [
+        [
+          {
+            "node": "Detect Intent (GPT)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Capture Commands": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare View Query": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Intent (GPT)": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "ai-copilot"
+    },
+    {
+      "name": "telegram"
+    },
+    {
+      "name": "webhook"
+    }
+  ],
+  "active": false
+}

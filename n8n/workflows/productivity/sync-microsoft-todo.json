@@ -1,0 +1,945 @@
+{
+  "name": "Sync Microsoft To-Do (Bidirectional)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/10 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Every 10 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT last_sync_at, metadata->>'list_id' as list_id FROM sync_status WHERE source = 'microsoft_todo' AND entity_type = 'tasks' LIMIT 1",
+        "options": {}
+      },
+      "id": "get-sync-status",
+      "name": "Get Sync Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 400],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Initialize sync metadata\nconst syncStatus = $input.item.json;\nconst now = new Date();\n\n// Default list ID from environment or use primary list\nconst listId = syncStatus.list_id || $env.MS_TODO_LIST_ID || 'tasks';\n\n// Last sync time (default to 1 hour ago if first sync)\nlet lastSync;\nif (syncStatus.last_sync_at) {\n  lastSync = new Date(syncStatus.last_sync_at);\n} else {\n  lastSync = new Date();\n  lastSync.setHours(lastSync.getHours() - 1);\n}\n\nreturn {\n  json: {\n    list_id: listId,\n    last_sync_at: lastSync.toISOString(),\n    current_sync_at: now.toISOString(),\n    is_first_sync: !syncStatus.last_sync_at\n  }\n};"
+      },
+      "id": "prepare-sync",
+      "name": "Prepare Sync",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://graph.microsoft.com/v1.0/me/todo/lists/{{ $json.list_id }}/tasks",
+        "authentication": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "$filter",
+              "value": "=lastModifiedDateTime ge {{ $json.last_sync_at }}"
+            },
+            {
+              "name": "$orderby",
+              "value": "lastModifiedDateTime desc"
+            },
+            {
+              "name": "$top",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fetch-ms-tasks",
+      "name": "1. Fetch MS To-Do Tasks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 200],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "microsoft-oauth",
+          "name": "Microsoft 365 OAuth"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-tasks",
+              "leftValue": "={{ $json.value?.length || 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-ms-tasks",
+      "name": "Has MS Tasks?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "value",
+        "options": {}
+      },
+      "id": "split-ms-tasks",
+      "name": "Split MS Tasks",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [1340, 100]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Transform Microsoft To-Do task to inbox_item format\nconst task = $input.item.json;\n\n// Map MS To-Do status to inbox_items status\nconst mapStatus = (msStatus) => {\n  const statusMap = {\n    'notStarted': 'neu',\n    'inProgress': 'in_bearbeitung',\n    'completed': 'erledigt',\n    'waitingOnOthers': 'warten',\n    'deferred': 'zurückgestellt'\n  };\n  return statusMap[msStatus] || 'neu';\n};\n\n// Map importance to priority\nconst mapPriority = (importance) => {\n  const priorityMap = {\n    'high': 'hoch',\n    'normal': 'mittel',\n    'low': 'niedrig'\n  };\n  return priorityMap[importance] || 'mittel';\n};\n\n// Parse due date\nconst parseDueDate = (dueDateTime) => {\n  if (!dueDateTime) return null;\n  if (dueDateTime.dateTime) {\n    return dueDateTime.dateTime.split('T')[0];\n  }\n  return null;\n};\n\n// Extract categories/tags\nconst categories = task.categories || [];\n\nreturn {\n  json: {\n    source: 'microsoft_todo',\n    source_id: task.id,\n    item_type: 'task',\n    title: task.title || 'Untitled Task',\n    content: task.body?.content || null,\n    content_type: task.body?.contentType || 'text',\n    status: mapStatus(task.status),\n    priority: mapPriority(task.importance),\n    due_date: parseDueDate(task.dueDateTime),\n    reminder_date: task.reminderDateTime?.dateTime || null,\n    is_completed: task.status === 'completed',\n    completed_at: task.completedDateTime?.dateTime || null,\n    categories: categories,\n    ms_task_data: {\n      id: task.id,\n      etag: task['@odata.etag'],\n      listId: task.parentListId,\n      createdDateTime: task.createdDateTime,\n      lastModifiedDateTime: task.lastModifiedDateTime,\n      hasAttachments: task.hasAttachments || false,\n      checklistItems: task.checklistItems || [],\n      linkedResources: task.linkedResources || []\n    }\n  }\n};"
+      },
+      "id": "transform-ms-to-inbox",
+      "name": "Transform MS → Inbox",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO inbox_items (id, source, source_id, item_type, title, content, status, priority, due_date, is_completed, completed_at, metadata, created_at, updated_at) VALUES (gen_random_uuid(), '{{ $json.source }}', '{{ $json.source_id }}', '{{ $json.item_type }}', '{{ $json.title.replace(/'/g, \"''\") }}', {{ $json.content ? \"'\" + $json.content.replace(/'/g, \"''\").substring(0, 10000) + \"'\" : 'NULL' }}, '{{ $json.status }}', '{{ $json.priority }}', {{ $json.due_date ? \"'\" + $json.due_date + \"'\" : 'NULL' }}, {{ $json.is_completed }}, {{ $json.completed_at ? \"'\" + $json.completed_at + \"'\" : 'NULL' }}, '{{ JSON.stringify($json.ms_task_data).replace(/'/g, \"''\") }}'::jsonb, NOW(), NOW()) ON CONFLICT (source, source_id) DO UPDATE SET title = EXCLUDED.title, content = EXCLUDED.content, status = EXCLUDED.status, priority = EXCLUDED.priority, due_date = EXCLUDED.due_date, is_completed = EXCLUDED.is_completed, completed_at = EXCLUDED.completed_at, metadata = EXCLUDED.metadata, updated_at = NOW() WHERE inbox_items.updated_at < NOW() - INTERVAL '1 minute'",
+        "options": {}
+      },
+      "id": "upsert-inbox-from-ms",
+      "name": "Upsert Inbox from MS",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1780, 100],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ii.*, ii.metadata->>'id' as ms_task_id, ii.metadata->>'listId' as ms_list_id, ii.metadata->>'etag' as ms_etag FROM inbox_items ii WHERE ii.source = 'microsoft_todo' AND ii.updated_at > '{{ $('Prepare Sync').item.json.last_sync_at }}' AND ii.updated_at > ii.created_at + INTERVAL '1 second' AND (ii.metadata->>'lastModifiedDateTime')::timestamp < ii.updated_at - INTERVAL '1 minute'",
+        "options": {}
+      },
+      "id": "get-local-changes",
+      "name": "2. Get Local Changes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [900, 400],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-local-changes",
+              "leftValue": "={{ $json.length || $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-local-changes",
+      "name": "Has Local Changes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Transform inbox_item to Microsoft To-Do task format\nconst item = $input.item.json;\n\n// Map inbox status to MS To-Do status\nconst mapStatus = (inboxStatus) => {\n  const statusMap = {\n    'neu': 'notStarted',\n    'in_bearbeitung': 'inProgress',\n    'erledigt': 'completed',\n    'warten': 'waitingOnOthers',\n    'zurückgestellt': 'deferred',\n    'archiviert': 'completed'\n  };\n  return statusMap[inboxStatus] || 'notStarted';\n};\n\n// Map priority to importance\nconst mapImportance = (priority) => {\n  const importanceMap = {\n    'hoch': 'high',\n    'mittel': 'normal',\n    'niedrig': 'low'\n  };\n  return importanceMap[priority] || 'normal';\n};\n\n// Build MS To-Do task body\nconst msTask = {\n  title: item.title,\n  status: mapStatus(item.status),\n  importance: mapImportance(item.priority)\n};\n\n// Add body if content exists\nif (item.content) {\n  msTask.body = {\n    content: item.content,\n    contentType: 'text'\n  };\n}\n\n// Add due date if exists\nif (item.due_date) {\n  msTask.dueDateTime = {\n    dateTime: item.due_date + 'T00:00:00',\n    timeZone: 'Europe/Berlin'\n  };\n}\n\nreturn {\n  json: {\n    inbox_item_id: item.id,\n    ms_task_id: item.ms_task_id,\n    ms_list_id: item.ms_list_id || $('Prepare Sync').item.json.list_id,\n    ms_etag: item.ms_etag,\n    ms_task_body: msTask\n  }\n};"
+      },
+      "id": "transform-inbox-to-ms",
+      "name": "Transform Inbox → MS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 400]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://graph.microsoft.com/v1.0/me/todo/lists/{{ $json.ms_list_id }}/tasks/{{ $json.ms_task_id }}",
+        "authentication": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "If-Match",
+              "value": "={{ $json.ms_etag }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "",
+              "value": "={{ JSON.stringify($json.ms_task_body) }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "update-ms-task",
+      "name": "Update MS Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 400],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "microsoft-oauth",
+          "name": "Microsoft 365 OAuth"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE inbox_items SET metadata = metadata || '{\"lastModifiedDateTime\": \"{{ $now.toISO() }}\"}'::jsonb WHERE id = '{{ $json.inbox_item_id }}'",
+        "options": {}
+      },
+      "id": "update-local-metadata",
+      "name": "Update Local Metadata",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1780, 400],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ii.* FROM inbox_items ii WHERE (ii.source = 'manual' OR ii.source = 'lifeos') AND ii.sync_to_external = true AND ii.source_id IS NULL AND ii.item_type = 'task'",
+        "options": {}
+      },
+      "id": "get-new-local-tasks",
+      "name": "3. Get New Local Tasks",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [900, 600],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-new-tasks",
+              "leftValue": "={{ $json.length || $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-new-tasks",
+      "name": "Has New Tasks?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 600]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Transform new inbox_item to Microsoft To-Do task for creation\nconst item = $input.item.json;\n\n// Map inbox status to MS To-Do status\nconst mapStatus = (inboxStatus) => {\n  const statusMap = {\n    'neu': 'notStarted',\n    'in_bearbeitung': 'inProgress',\n    'erledigt': 'completed',\n    'warten': 'waitingOnOthers',\n    'zurückgestellt': 'deferred'\n  };\n  return statusMap[inboxStatus] || 'notStarted';\n};\n\n// Map priority to importance\nconst mapImportance = (priority) => {\n  const importanceMap = {\n    'hoch': 'high',\n    'mittel': 'normal',\n    'niedrig': 'low'\n  };\n  return importanceMap[priority] || 'normal';\n};\n\n// Build MS To-Do task body\nconst msTask = {\n  title: item.title || 'New Task',\n  status: mapStatus(item.status),\n  importance: mapImportance(item.priority)\n};\n\n// Add body if content exists\nif (item.content) {\n  msTask.body = {\n    content: item.content,\n    contentType: 'text'\n  };\n}\n\n// Add due date if exists\nif (item.due_date) {\n  msTask.dueDateTime = {\n    dateTime: item.due_date + 'T00:00:00',\n    timeZone: 'Europe/Berlin'\n  };\n}\n\n// Add reminder if exists\nif (item.reminder_date) {\n  msTask.reminderDateTime = {\n    dateTime: item.reminder_date,\n    timeZone: 'Europe/Berlin'\n  };\n  msTask.isReminderOn = true;\n}\n\nreturn {\n  json: {\n    inbox_item_id: item.id,\n    ms_list_id: $('Prepare Sync').item.json.list_id,\n    ms_task_body: msTask\n  }\n};"
+      },
+      "id": "transform-new-to-ms",
+      "name": "Transform New → MS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.microsoft.com/v1.0/me/todo/lists/{{ $json.ms_list_id }}/tasks",
+        "authentication": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "",
+              "value": "={{ JSON.stringify($json.ms_task_body) }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "create-ms-task",
+      "name": "Create MS Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 600],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "microsoft-oauth",
+          "name": "Microsoft 365 OAuth"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Extract the created task info for updating local record\nconst response = $input.item.json;\nconst inboxItemId = $('Transform New → MS').item.json.inbox_item_id;\n\nreturn {\n  json: {\n    inbox_item_id: inboxItemId,\n    ms_task_id: response.id,\n    ms_list_id: response.parentListId,\n    ms_etag: response['@odata.etag'],\n    ms_created_at: response.createdDateTime\n  }\n};"
+      },
+      "id": "extract-created-task",
+      "name": "Extract Created Task",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 600]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE inbox_items SET source = 'microsoft_todo', source_id = '{{ $json.ms_task_id }}', metadata = jsonb_build_object('id', '{{ $json.ms_task_id }}', 'listId', '{{ $json.ms_list_id }}', 'etag', '{{ $json.ms_etag }}', 'createdDateTime', '{{ $json.ms_created_at }}', 'lastModifiedDateTime', '{{ $now.toISO() }}'), sync_to_external = false, updated_at = NOW() WHERE id = '{{ $json.inbox_item_id }}'",
+        "options": {}
+      },
+      "id": "update-source-id",
+      "name": "Update Source ID",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2000, 600],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "merge-all-results",
+      "name": "Merge All Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [2220, 400],
+      "parameters": {
+        "mode": "combine",
+        "mergeByFields": {
+          "values": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_status (id, source, entity_type, last_sync_at, status, records_synced, metadata) VALUES (gen_random_uuid(), 'microsoft_todo', 'tasks', NOW(), 'success', {{ $input.all().length || 0 }}, jsonb_build_object('list_id', '{{ $('Prepare Sync').item.json.list_id }}', 'direction', 'bidirectional')) ON CONFLICT (source, entity_type) DO UPDATE SET last_sync_at = NOW(), status = 'success', records_synced = {{ $input.all().length || 0 }}, error_message = NULL, metadata = EXCLUDED.metadata",
+        "options": {}
+      },
+      "id": "update-sync-status-success",
+      "name": "Update Sync Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2440, 400],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_status (id, source, entity_type, last_sync_at, status, error_message) VALUES (gen_random_uuid(), 'microsoft_todo', 'tasks', NOW(), 'error', '{{ $json.message || $json.error?.message || \"Unknown error\" }}') ON CONFLICT (source, entity_type) DO UPDATE SET last_sync_at = NOW(), status = 'error', error_message = '{{ $json.message || $json.error?.message || \"Unknown error\" }}'",
+        "options": {}
+      },
+      "id": "update-sync-status-error",
+      "name": "Update Sync Status (Error)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1340, 800],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "=:warning: **Microsoft To-Do Sync Failed**\n\nTime: {{ $now.toISO() }}\nError: {{ $json.message || $json.error?.message || 'Unknown error' }}\n\nPlease check if the Microsoft 365 OAuth token needs to be refreshed.",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-error",
+      "name": "Send Telegram Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1560, 800],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Life OS Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "no-op-end",
+      "name": "End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2660, 400]
+    },
+    {
+      "parameters": {},
+      "id": "no-op-skip-ms-pull",
+      "name": "Skip MS Pull",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {},
+      "id": "no-op-skip-local-push",
+      "name": "Skip Local Push",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1340, 500]
+    },
+    {
+      "parameters": {},
+      "id": "no-op-skip-new-create",
+      "name": "Skip New Create",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1340, 700]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/me/todo/lists",
+        "authentication": "oAuth2Api",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "get-todo-lists",
+      "name": "Get To-Do Lists",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 200],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "microsoft-oauth",
+          "name": "Microsoft 365 OAuth"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://graph.microsoft.com/v1.0/me/todo/lists/{{ $json.ms_list_id }}/tasks/{{ $json.ms_task_id }}",
+        "authentication": "oAuth2Api",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "delete-ms-task",
+      "name": "Delete MS Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 500],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "microsoft-oauth",
+          "name": "Microsoft 365 OAuth"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ii.*, ii.metadata->>'id' as ms_task_id, ii.metadata->>'listId' as ms_list_id FROM inbox_items ii WHERE ii.source = 'microsoft_todo' AND ii.deleted_at IS NOT NULL AND ii.metadata->>'deleted_from_ms' IS NULL",
+        "options": {}
+      },
+      "id": "get-deleted-items",
+      "name": "Get Deleted Items",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [900, 800],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-postgres",
+          "name": "Supabase PostgreSQL"
+        }
+      },
+      "disabled": true
+    }
+  ],
+  "connections": {
+    "Every 10 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Get Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Sync Status": {
+      "main": [
+        [
+          {
+            "node": "Prepare Sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Sync": {
+      "main": [
+        [
+          {
+            "node": "1. Fetch MS To-Do Tasks",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "2. Get Local Changes",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "3. Get New Local Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Fetch MS To-Do Tasks": {
+      "main": [
+        [
+          {
+            "node": "Has MS Tasks?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Sync Status (Error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has MS Tasks?": {
+      "main": [
+        [
+          {
+            "node": "Split MS Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip MS Pull",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split MS Tasks": {
+      "main": [
+        [
+          {
+            "node": "Transform MS → Inbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform MS → Inbox": {
+      "main": [
+        [
+          {
+            "node": "Upsert Inbox from MS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Inbox from MS": {
+      "main": [
+        [
+          {
+            "node": "Merge All Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip MS Pull": {
+      "main": [
+        [
+          {
+            "node": "Merge All Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Get Local Changes": {
+      "main": [
+        [
+          {
+            "node": "Has Local Changes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Local Changes?": {
+      "main": [
+        [
+          {
+            "node": "Transform Inbox → MS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Local Push",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Inbox → MS": {
+      "main": [
+        [
+          {
+            "node": "Update MS Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update MS Task": {
+      "main": [
+        [
+          {
+            "node": "Update Local Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Sync Status (Error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Local Metadata": {
+      "main": [
+        [
+          {
+            "node": "Merge All Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Skip Local Push": {
+      "main": [
+        [
+          {
+            "node": "Merge All Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "3. Get New Local Tasks": {
+      "main": [
+        [
+          {
+            "node": "Has New Tasks?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has New Tasks?": {
+      "main": [
+        [
+          {
+            "node": "Transform New → MS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip New Create",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform New → MS": {
+      "main": [
+        [
+          {
+            "node": "Create MS Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create MS Task": {
+      "main": [
+        [
+          {
+            "node": "Extract Created Task",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Sync Status (Error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Created Task": {
+      "main": [
+        [
+          {
+            "node": "Update Source ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Source ID": {
+      "main": [
+        [
+          {
+            "node": "Merge All Results",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Skip New Create": {
+      "main": [
+        [
+          {
+            "node": "Merge All Results",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge All Results": {
+      "main": [
+        [
+          {
+            "node": "Update Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sync Status": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sync Status (Error)": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Error": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "life-os"
+  },
+  "tags": [
+    {
+      "name": "productivity",
+      "id": "productivity-tag"
+    },
+    {
+      "name": "sync",
+      "id": "sync-tag"
+    },
+    {
+      "name": "microsoft",
+      "id": "microsoft-tag"
+    },
+    {
+      "name": "bidirectional",
+      "id": "bidirectional-tag"
+    }
+  ],
+  "pinData": {},
+  "staticData": null,
+  "triggerCount": 0
+}

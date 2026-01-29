@@ -1,0 +1,389 @@
+{
+  "name": "09 - Sync Microsoft To-Do",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Every 10 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "task",
+        "operation": "getAll",
+        "taskListId": "={{ $env.MS_TODO_LIST_ID }}",
+        "returnAll": true,
+        "filters": {}
+      },
+      "id": "get-ms-tasks",
+      "name": "Get MS To-Do Tasks",
+      "type": "n8n-nodes-base.microsoftToDo",
+      "typeVersion": 1,
+      "position": [
+        460,
+        200
+      ],
+      "credentials": {
+        "microsoftToDoOAuth2Api": {
+          "id": "ms-todo-creds",
+          "name": "Microsoft To-Do"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "inbox_items",
+        "columns": "id, external_id, title, content, status, priority, due_date, updated_at",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "source",
+              "keyValue": "microsoft_todo"
+            }
+          ]
+        },
+        "options": {
+          "returnAll": true
+        }
+      },
+      "id": "get-local-tasks",
+      "name": "Get Local Tasks",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        460,
+        400
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Bidirectional sync logic\nconst msTasks = $('Get MS To-Do Tasks').all();\nconst localTasks = $('Get Local Tasks').all();\n\nconst toCreateLocal = [];\nconst toUpdateLocal = [];\nconst toCreateRemote = [];\nconst toUpdateRemote = [];\n\n// Build lookup maps\nconst msTaskMap = new Map();\nfor (const task of msTasks) {\n  msTaskMap.set(task.json.id, task.json);\n}\n\nconst localTaskMap = new Map();\nfor (const task of localTasks) {\n  if (task.json.external_id) {\n    localTaskMap.set(task.json.external_id, task.json);\n  }\n}\n\n// Check MS tasks -> Local\nfor (const [msId, msTask] of msTaskMap) {\n  const localTask = localTaskMap.get(msId);\n  \n  if (!localTask) {\n    // New task from MS To-Do\n    toCreateLocal.push({\n      external_id: msId,\n      source: 'microsoft_todo',\n      title: msTask.title,\n      content: msTask.body?.content || '',\n      status: msTask.status === 'completed' ? 'completed' : 'pending',\n      priority: mapMsPriority(msTask.importance),\n      due_date: msTask.dueDateTime?.dateTime || null,\n      item_type: 'task'\n    });\n  } else {\n    // Check if MS task is newer\n    const msUpdated = new Date(msTask.lastModifiedDateTime);\n    const localUpdated = new Date(localTask.updated_at);\n    \n    if (msUpdated > localUpdated) {\n      toUpdateLocal.push({\n        id: localTask.id,\n        title: msTask.title,\n        content: msTask.body?.content || '',\n        status: msTask.status === 'completed' ? 'completed' : 'pending',\n        priority: mapMsPriority(msTask.importance),\n        due_date: msTask.dueDateTime?.dateTime || null\n      });\n    }\n  }\n}\n\n// Check Local tasks -> MS (new tasks created locally)\nfor (const [extId, localTask] of localTaskMap) {\n  if (!msTaskMap.has(extId)) {\n    // Task was deleted from MS To-Do, mark as completed locally or sync back\n    // For now, we'll leave it - implement based on preference\n  }\n}\n\nfunction mapMsPriority(importance) {\n  switch (importance) {\n    case 'high': return 'high';\n    case 'low': return 'low';\n    default: return 'medium';\n  }\n}\n\nreturn [{\n  json: {\n    toCreateLocal,\n    toUpdateLocal,\n    toCreateRemote,\n    toUpdateRemote,\n    summary: {\n      newLocal: toCreateLocal.length,\n      updateLocal: toUpdateLocal.length,\n      newRemote: toCreateRemote.length,\n      updateRemote: toUpdateRemote.length\n    }\n  }\n}];"
+      },
+      "id": "sync-logic",
+      "name": "Sync Logic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        740,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.summary.newLocal }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "has-new-local",
+      "name": "New Local Tasks?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        960,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract tasks to create locally\nconst data = $('Sync Logic').first().json;\nreturn data.toCreateLocal.map(task => ({ json: task }));"
+      },
+      "id": "extract-new",
+      "name": "Extract New Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "inbox_items",
+        "columns": "external_id, source, title, content, status, priority, due_date, item_type",
+        "options": {}
+      },
+      "id": "insert-local",
+      "name": "Insert Local Tasks",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1400,
+        100
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.summary.updateLocal }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "has-updates",
+      "name": "Updates to Apply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        960,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract tasks to update locally\nconst data = $('Sync Logic').first().json;\nreturn data.toUpdateLocal.map(task => ({ json: task }));"
+      },
+      "id": "extract-updates",
+      "name": "Extract Updates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "inbox_items",
+        "columns": "title, content, status, priority, due_date",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "update-local",
+      "name": "Update Local Tasks",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1400,
+        400
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "sync_status",
+        "columns": "last_sync_at, last_sync_status, items_synced",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "source",
+              "keyValue": "microsoft_todo"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "update-sync-status",
+      "name": "Update Sync Status",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1620,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 10 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Get MS To-Do Tasks",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Local Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get MS To-Do Tasks": {
+      "main": [
+        [
+          {
+            "node": "Sync Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Local Tasks": {
+      "main": [
+        [
+          {
+            "node": "Sync Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync Logic": {
+      "main": [
+        [
+          {
+            "node": "New Local Tasks?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Updates to Apply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Local Tasks?": {
+      "main": [
+        [
+          {
+            "node": "Extract New Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract New Tasks": {
+      "main": [
+        [
+          {
+            "node": "Insert Local Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Local Tasks": {
+      "main": [
+        [
+          {
+            "node": "Update Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Updates to Apply?": {
+      "main": [
+        [
+          {
+            "node": "Extract Updates",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Extract Updates": {
+      "main": [
+        [
+          {
+            "node": "Update Local Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Local Tasks": {
+      "main": [
+        [
+          {
+            "node": "Update Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "productivity"
+    },
+    {
+      "name": "sync"
+    }
+  ],
+  "active": false
+}

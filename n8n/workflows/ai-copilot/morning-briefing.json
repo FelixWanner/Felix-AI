@@ -1,0 +1,279 @@
+{
+  "name": "Morning Briefing Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 06:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "garmin_daily_stats",
+        "returnAll": false,
+        "limit": 1,
+        "filterType": "string",
+        "filterString": "date=eq.{{ $now.minus(1, 'day').toFormat('yyyy-MM-dd') }}"
+      },
+      "id": "get-garmin-stats",
+      "name": "Get Sleep Data",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        450,
+        200
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "inbox_items",
+        "returnAll": false,
+        "limit": 10,
+        "filterType": "string",
+        "filterString": "status=in.(inbox,today)&or=(due_date.is.null,due_date.lte.{{ $now.toFormat('yyyy-MM-dd') }})"
+      },
+      "id": "get-tasks",
+      "name": "Get Priority Tasks",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        450,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "meetings",
+        "returnAll": false,
+        "limit": 10,
+        "filterType": "string",
+        "filterString": "start_time=gte.{{ $now.toFormat('yyyy-MM-dd') }}T00:00:00&start_time=lt.{{ $now.plus(1, 'day').toFormat('yyyy-MM-dd') }}T00:00:00"
+      },
+      "id": "get-meetings",
+      "name": "Get Today Meetings",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        450,
+        400
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "daily_readiness",
+        "returnAll": false,
+        "limit": 1,
+        "filterType": "string",
+        "filterString": "date=eq.{{ $now.toFormat('yyyy-MM-dd') }}"
+      },
+      "id": "get-readiness",
+      "name": "Get Readiness",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        450,
+        500
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const sleep = $('Get Sleep Data').first()?.json || {};\nconst tasks = $('Get Priority Tasks').all().map(i => i.json);\nconst meetings = $('Get Today Meetings').all().map(i => i.json);\nconst readiness = $('Get Readiness').first()?.json || {};\n\nconst today = new Date();\nconst dateStr = today.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });\n\nlet briefing = `🌅 *Morning Briefing - ${dateStr}*\\n\\n`;\n\n// Sleep Summary\nif (sleep.sleep_score) {\n  briefing += `😴 *Schlaf:* Score ${sleep.sleep_score}/100\\n`;\n  briefing += `   Dauer: ${Math.round((sleep.sleep_duration_minutes || 0) / 60)}h ${(sleep.sleep_duration_minutes || 0) % 60}min\\n\\n`;\n}\n\n// Readiness\nif (readiness.readiness_score) {\n  const emoji = readiness.readiness_score >= 80 ? '🟢' : readiness.readiness_score >= 60 ? '🟡' : '🔴';\n  briefing += `${emoji} *Readiness:* ${readiness.readiness_score}/100\\n`;\n  briefing += `   Empfehlung: ${readiness.recommendation || 'Normal'}\\n\\n`;\n}\n\n// Tasks\nbriefing += `📋 *Aufgaben heute:* ${tasks.length}\\n`;\nif (tasks.length > 0) {\n  tasks.slice(0, 5).forEach(t => {\n    briefing += `   • ${t.title}\\n`;\n  });\n  if (tasks.length > 5) briefing += `   ... und ${tasks.length - 5} weitere\\n`;\n}\nbriefing += '\\n';\n\n// Meetings\nbriefing += `📅 *Termine heute:* ${meetings.length}\\n`;\nif (meetings.length > 0) {\n  meetings.forEach(m => {\n    const time = new Date(m.start_time).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });\n    briefing += `   • ${time} - ${m.title}\\n`;\n  });\n}\nbriefing += '\\n';\n\n// Motivational message\nconst motivations = [\n  '💪 Mach heute zu deinem Tag!',\n  '🎯 Fokus auf das Wesentliche!',\n  '🚀 Ein produktiver Tag beginnt mit klaren Prioritäten!',\n  '✨ Du hast die Kontrolle über deinen Tag!'\n];\nbriefing += motivations[Math.floor(Math.random() * motivations.length)];\n\nreturn {\n  briefing: briefing,\n  date: today.toISOString().split('T')[0],\n  sleep_score: sleep.sleep_score,\n  readiness_score: readiness.readiness_score,\n  tasks_count: tasks.length,\n  meetings_count: meetings.length\n};"
+      },
+      "id": "generate-briefing",
+      "name": "Generate Briefing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "morning_briefings",
+        "columns": "date,sleep_summary,calendar_summary,meetings_count,priority_tasks,readiness_score,readiness_recommendation,full_briefing_text",
+        "options": {}
+      },
+      "id": "save-briefing",
+      "name": "Save Briefing",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        900,
+        200
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.briefing }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        900,
+        400
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-creds",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 06:30": {
+      "main": [
+        [
+          {
+            "node": "Get Sleep Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Priority Tasks",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Today Meetings",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Readiness",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Sleep Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Priority Tasks": {
+      "main": [
+        [
+          {
+            "node": "Generate Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Today Meetings": {
+      "main": [
+        [
+          {
+            "node": "Generate Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Readiness": {
+      "main": [
+        [
+          {
+            "node": "Generate Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Briefing": {
+      "main": [
+        [
+          {
+            "node": "Save Briefing",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "triggerCount": 0,
+  "updatedAt": "2025-01-20T00:00:00.000Z",
+  "versionId": "1"
+}

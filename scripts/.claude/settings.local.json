@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose:*)",
+      "Bash(docker build:*)",
+      "Bash(chmod:*)",
+      "Bash(/root/Felix-AI/scripts/build-frontend.sh:*)",
+      "Bash(bash scripts/build-frontend.sh:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker inspect:*)"
+    ]
+  }
+}

@@ -1,0 +1,253 @@
+{
+  "name": "04 - Sync Trade Republic",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "list",
+        "bucketName": "documents",
+        "prefix": "trade-republic/exports/",
+        "options": {
+          "sortDirection": "desc",
+          "limit": 1
+        }
+      },
+      "id": "list-files",
+      "name": "List CSV Files",
+      "type": "n8n-nodes-base.supabaseStorage",
+      "typeVersion": 1,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "bucketName": "documents",
+        "filePath": "={{ $json.name }}"
+      },
+      "id": "download-csv",
+      "name": "Download CSV",
+      "type": "n8n-nodes-base.supabaseStorage",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "delimiter": ";",
+          "headerRow": true
+        }
+      },
+      "id": "parse-csv",
+      "name": "Parse CSV",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Transform Trade Republic CSV to investment positions\nconst items = $input.all();\nconst positions = [];\nconst portfolioId = 'trade-republic-main'; // Default portfolio\n\nfor (const item of items) {\n  const row = item.json;\n  \n  // Skip empty rows or headers\n  if (!row.ISIN && !row.isin) continue;\n  \n  const isin = row.ISIN || row.isin;\n  const name = row.Name || row.name || row.Bezeichnung;\n  const quantity = parseFloat(row.Stück || row.Quantity || row.Anzahl) || 0;\n  const buyPrice = parseFloat(row.Kaufkurs || row['Buy Price'] || row.Einstandskurs) || 0;\n  const currentPrice = parseFloat(row.Kurs || row['Current Price'] || row.Aktuell) || 0;\n  const currency = row.Währung || row.Currency || 'EUR';\n  \n  positions.push({\n    json: {\n      portfolio_id: portfolioId,\n      isin: isin,\n      symbol: row.Symbol || null,\n      name: name,\n      asset_type: detectAssetType(name, isin),\n      quantity: quantity,\n      average_buy_price: buyPrice,\n      current_price: currentPrice,\n      total_value: quantity * currentPrice,\n      total_cost: quantity * buyPrice,\n      unrealized_pnl: (quantity * currentPrice) - (quantity * buyPrice),\n      unrealized_pnl_percent: buyPrice > 0 ? (((currentPrice - buyPrice) / buyPrice) * 100) : 0,\n      currency: currency,\n      last_price_update: new Date().toISOString(),\n      metadata: {\n        source: 'trade_republic',\n        import_date: new Date().toISOString(),\n        original_row: row\n      }\n    }\n  });\n}\n\nfunction detectAssetType(name, isin) {\n  const nameLower = (name || '').toLowerCase();\n  if (nameLower.includes('etf') || nameLower.includes('ishares') || nameLower.includes('vanguard') || nameLower.includes('xtrackers')) {\n    return 'etf';\n  }\n  if (isin && isin.startsWith('DE000')) {\n    return 'stock';\n  }\n  return 'stock';\n}\n\nreturn positions;"
+      },
+      "id": "transform-data",
+      "name": "Transform Positions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "investment_positions",
+        "columns": "portfolio_id, isin, symbol, name, asset_type, quantity, average_buy_price, current_price, total_value, total_cost, unrealized_pnl, unrealized_pnl_percent, currency, last_price_update, metadata",
+        "conflictColumns": "portfolio_id, isin",
+        "options": {}
+      },
+      "id": "supabase-upsert",
+      "name": "Upsert Positions",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calculate portfolio totals\nconst positions = $input.all();\n\nlet totalValue = 0;\nlet totalCost = 0;\n\nfor (const pos of positions) {\n  totalValue += pos.json.total_value || 0;\n  totalCost += pos.json.total_cost || 0;\n}\n\nreturn [{\n  json: {\n    portfolio_id: 'trade-republic-main',\n    total_value: totalValue,\n    total_cost: totalCost,\n    total_pnl: totalValue - totalCost,\n    total_pnl_percent: totalCost > 0 ? ((totalValue - totalCost) / totalCost * 100) : 0,\n    position_count: positions.length,\n    last_sync_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "calc-totals",
+      "name": "Calculate Totals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "portfolios",
+        "columns": "id, total_value, total_cost, total_pnl, total_pnl_percent, position_count, last_sync_at",
+        "conflictColumns": "id",
+        "options": {}
+      },
+      "id": "update-portfolio",
+      "name": "Update Portfolio",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 07:00": {
+      "main": [
+        [
+          {
+            "node": "List CSV Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List CSV Files": {
+      "main": [
+        [
+          {
+            "node": "Download CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download CSV": {
+      "main": [
+        [
+          {
+            "node": "Parse CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse CSV": {
+      "main": [
+        [
+          {
+            "node": "Transform Positions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Positions": {
+      "main": [
+        [
+          {
+            "node": "Upsert Positions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Positions": {
+      "main": [
+        [
+          {
+            "node": "Calculate Totals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Totals": {
+      "main": [
+        [
+          {
+            "node": "Update Portfolio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "wealth"
+    },
+    {
+      "name": "investments"
+    }
+  ],
+  "active": false
+}

@@ -1,0 +1,61 @@
+# ═══════════════════════════════════════════════════════════════
+# Life OS - Docker Compose Override for Local Development
+# ═══════════════════════════════════════════════════════════════
+# Diese Datei wird automatisch mit docker-compose.yml gemergt.
+# Enthält lokale Entwicklungs-Overrides.
+
+services:
+  # ─────────────────────────────────────────────────────────────
+  # Frontend: React Dashboard
+  # ─────────────────────────────────────────────────────────────
+  frontend:
+    image: lifeos-frontend:latest
+    container_name: lifeos-frontend
+    restart: unless-stopped
+    networks:
+      - lifeos-net
+
+  # ─────────────────────────────────────────────────────────────
+  # Caddy: Lokale TLS Zertifikate
+  # ─────────────────────────────────────────────────────────────
+  caddy:
+    environment:
+      - DOMAIN=localhost
+
+  # ─────────────────────────────────────────────────────────────
+  # Supabase DB: Direkter Port-Zugriff für Entwicklung
+  # ─────────────────────────────────────────────────────────────
+  supabase-db:
+    ports:
+      - "5432:5432"
+
+  # ─────────────────────────────────────────────────────────────
+  # Kong: Direkter API-Zugriff
+  # ─────────────────────────────────────────────────────────────
+  supabase-kong:
+    ports:
+      - "8000:8000"
+
+  # ─────────────────────────────────────────────────────────────
+  # Studio: Direkter Zugriff
+  # ─────────────────────────────────────────────────────────────
+  supabase-studio:
+    ports:
+      - "3000:3000"
+
+  # ─────────────────────────────────────────────────────────────
+  # n8n: Direkter Zugriff
+  # ─────────────────────────────────────────────────────────────
+  n8n:
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678
+
+  # ─────────────────────────────────────────────────────────────
+  # Docling: Direkter Zugriff + UI
+  # ─────────────────────────────────────────────────────────────
+  docling:
+    ports:
+      - "5001:5001"

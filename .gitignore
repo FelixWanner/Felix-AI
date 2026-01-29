@@ -1,0 +1,41 @@
+# Environment files with secrets
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Frontend environment (contains API keys)
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+
+# Node modules
+node_modules/
+frontend/node_modules/
+
+# Build outputs
+frontend/dist/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker volumes (contain runtime data)
+volumes/
+
+# Backups
+backups/
+*.sql
+*.dump
+
+# Temporary files
+tmp/
+temp/
+*.tmp

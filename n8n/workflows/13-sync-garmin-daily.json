@@ -1,0 +1,255 @@
+{
+  "name": "13 - Sync Garmin Daily",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.GARMIN_API_URL }}/wellness-api/rest/dailySummaryChart",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "date",
+              "value": "={{ new Date().toISOString().split('T')[0] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "garmin-daily",
+      "name": "Get Garmin Daily Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        460,
+        200
+      ],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "garmin-oauth",
+          "name": "Garmin Connect"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.GARMIN_API_URL }}/wellness-api/rest/dailySleep",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "date",
+              "value": "={{ new Date().toISOString().split('T')[0] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "garmin-sleep",
+      "name": "Get Sleep Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        460,
+        400
+      ],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "garmin-oauth",
+          "name": "Garmin Connect"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Transform Garmin data to garmin_daily_stats table format\nconst dailyData = $('Get Garmin Daily Summary').first().json;\nconst sleepData = $('Get Sleep Data').first().json;\n\nconst today = new Date().toISOString().split('T')[0];\n\n// Parse data according to actual DB schema\nconst daily = {\n  date: today,\n  \n  // Sleep metrics (minutes, not seconds)\n  sleep_score: sleepData.sleepScores?.overall?.value || null,\n  sleep_duration_minutes: Math.round((sleepData.sleepTimeSeconds || 0) / 60),\n  deep_sleep_minutes: Math.round((sleepData.deepSleepSeconds || 0) / 60),\n  light_sleep_minutes: Math.round((sleepData.lightSleepSeconds || 0) / 60),\n  rem_sleep_minutes: Math.round((sleepData.remSleepSeconds || 0) / 60),\n  awake_minutes: Math.round((sleepData.awakeSleepSeconds || 0) / 60),\n  \n  // Body Battery\n  body_battery_start: dailyData.bodyBatteryLowestValue || null,\n  body_battery_end: dailyData.bodyBatteryMostRecentValue || null,\n  body_battery_charged: null, // Calculate if data available\n  body_battery_drained: null, // Calculate if data available\n  \n  // Stress\n  stress_avg: dailyData.averageStressLevel || null,\n  stress_max: dailyData.maxStressLevel || null,\n  rest_stress_minutes: null,\n  low_stress_minutes: null,\n  medium_stress_minutes: null,\n  high_stress_minutes: null,\n  \n  // Activity\n  steps: dailyData.totalSteps || null,\n  active_calories: dailyData.activeKilocalories || null,\n  total_calories: dailyData.totalKilocalories || null,\n  intensity_minutes: (dailyData.moderateIntensityMinutes || 0) + (dailyData.vigorousIntensityMinutes || 0),\n  floors_climbed: dailyData.floorsAscended || null,\n  \n  // Heart\n  resting_hr: dailyData.restingHeartRate || null,\n  \n  // HRV\n  hrv_status: dailyData.hrvStatus || null,\n  hrv_value: dailyData.hrvLastNight || null,\n  \n  synced_at: new Date().toISOString()\n};\n\nreturn [{ json: daily }];"
+      },
+      "id": "transform-data",
+      "name": "Transform Garmin Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        740,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "garmin_daily_stats",
+        "columns": "date, sleep_score, sleep_duration_minutes, deep_sleep_minutes, light_sleep_minutes, rem_sleep_minutes, awake_minutes, body_battery_start, body_battery_end, body_battery_charged, body_battery_drained, stress_avg, stress_max, rest_stress_minutes, low_stress_minutes, medium_stress_minutes, high_stress_minutes, steps, active_calories, total_calories, intensity_minutes, floors_climbed, resting_hr, hrv_status, hrv_value, synced_at",
+        "conflictColumns": "date",
+        "options": {}
+      },
+      "id": "save-stats",
+      "name": "Save Garmin Stats",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        960,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyze data and check for alerts\nconst data = $input.first().json;\nconst alerts = [];\n\n// Sleep quality check\nconst sleepHours = data.sleep_duration_seconds / 3600;\nif (sleepHours < 6) {\n  alerts.push({\n    type: 'low_sleep',\n    severity: 'warning',\n    message: `Nur ${sleepHours.toFixed(1)}h Schlaf letzte Nacht`\n  });\n}\n\n// Body Battery check\nif (data.body_battery_current < 30) {\n  alerts.push({\n    type: 'low_battery',\n    severity: 'warning',\n    message: `Body Battery nur ${data.body_battery_current}%`\n  });\n}\n\n// Stress check\nif (data.average_stress > 50) {\n  alerts.push({\n    type: 'high_stress',\n    severity: 'info',\n    message: `Durchschnittlicher Stress: ${data.average_stress}`\n  });\n}\n\n// HRV check\nif (data.hrv_status === 'LOW' || data.hrv_status === 'POOR') {\n  alerts.push({\n    type: 'low_hrv',\n    severity: 'warning',\n    message: `HRV Status: ${data.hrv_status}`\n  });\n}\n\n// Resting HR check (if unusual)\nif (data.resting_hr > 80) {\n  alerts.push({\n    type: 'high_rhr',\n    severity: 'info',\n    message: `Ruhepuls erhöht: ${data.resting_hr} bpm`\n  });\n}\n\nreturn [{\n  json: {\n    ...data,\n    alerts,\n    has_alerts: alerts.length > 0\n  }\n}];"
+      },
+      "id": "analyze-data",
+      "name": "Analyze Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "sync_status",
+        "columns": "last_sync_at, last_sync_status, items_synced",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "source",
+              "keyValue": "garmin"
+            }
+          ]
+        }
+      },
+      "id": "update-sync",
+      "name": "Update Sync Status",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1400,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 08:00": {
+      "main": [
+        [
+          {
+            "node": "Get Garmin Daily Summary",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Sleep Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Garmin Daily Summary": {
+      "main": [
+        [
+          {
+            "node": "Transform Garmin Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Sleep Data": {
+      "main": [
+        [
+          {
+            "node": "Transform Garmin Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Garmin Data": {
+      "main": [
+        [
+          {
+            "node": "Save Garmin Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Garmin Stats": {
+      "main": [
+        [
+          {
+            "node": "Analyze Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Data": {
+      "main": [
+        [
+          {
+            "node": "Update Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "health"
+    },
+    {
+      "name": "sync"
+    }
+  ],
+  "active": false
+}

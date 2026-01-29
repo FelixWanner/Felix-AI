@@ -1,0 +1,315 @@
+{
+  "name": "07 - Check Rent Payments",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 5 * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "5th of Month 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "tenants",
+        "columns": "id, property_id, unit_id, name, email, phone, monthly_rent, rent_due_day, is_active",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "is_active",
+              "keyValue": "true"
+            }
+          ]
+        },
+        "options": {
+          "returnAll": true
+        }
+      },
+      "id": "get-tenants",
+      "name": "Get Active Tenants",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get current month's date range\nconst now = new Date();\nconst year = now.getFullYear();\nconst month = now.getMonth();\n\nconst firstDay = new Date(year, month, 1).toISOString().split('T')[0];\nconst today = now.toISOString().split('T')[0];\n\nconst tenants = $input.all();\n\nreturn tenants.map(t => ({\n  json: {\n    ...t.json,\n    check_from: firstDay,\n    check_to: today\n  }\n}));"
+      },
+      "id": "prepare-date-range",
+      "name": "Prepare Date Range",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": "public",
+        "table": "transactions",
+        "columns": "id, amount, date, description, counterparty",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "transaction_type",
+              "keyValue": "income"
+            },
+            {
+              "keyName": "date",
+              "condition": "gte",
+              "keyValue": "={{ $json.check_from }}"
+            },
+            {
+              "keyName": "date",
+              "condition": "lte",
+              "keyValue": "={{ $json.check_to }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-transactions",
+      "name": "Get This Month's Income",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check for missing rent payments\nconst tenants = $('Prepare Date Range').all();\nconst transactions = $input.all();\n\nconst missingPayments = [];\nconst receivedPayments = [];\n\nfor (const tenantItem of tenants) {\n  const tenant = tenantItem.json;\n  const expectedRent = parseFloat(tenant.monthly_rent) || 0;\n  \n  // Find matching transaction\n  const matchingTx = transactions.find(tx => {\n    const txAmount = Math.abs(parseFloat(tx.json.amount) || 0);\n    const amountMatch = Math.abs(txAmount - expectedRent) < 1; // 1 EUR tolerance\n    const nameMatch = tx.json.counterparty?.toLowerCase().includes(tenant.name?.toLowerCase().split(' ')[0]);\n    const descMatch = tx.json.description?.toLowerCase().includes('miete') || \n                      tx.json.description?.toLowerCase().includes(tenant.name?.toLowerCase().split(' ')[0]);\n    return amountMatch && (nameMatch || descMatch);\n  });\n  \n  if (matchingTx) {\n    receivedPayments.push({\n      tenant_id: tenant.id,\n      tenant_name: tenant.name,\n      expected: expectedRent,\n      received: parseFloat(matchingTx.json.amount),\n      date: matchingTx.json.date,\n      status: 'received'\n    });\n  } else {\n    missingPayments.push({\n      tenant_id: tenant.id,\n      tenant_name: tenant.name,\n      property_id: tenant.property_id,\n      unit_id: tenant.unit_id,\n      expected: expectedRent,\n      email: tenant.email,\n      phone: tenant.phone,\n      status: 'missing'\n    });\n  }\n}\n\nreturn [{\n  json: {\n    check_date: new Date().toISOString(),\n    total_tenants: tenants.length,\n    payments_received: receivedPayments.length,\n    payments_missing: missingPayments.length,\n    missing_details: missingPayments,\n    received_details: receivedPayments,\n    total_expected: tenants.reduce((sum, t) => sum + (parseFloat(t.json.monthly_rent) || 0), 0),\n    total_received: receivedPayments.reduce((sum, p) => sum + p.received, 0)\n  }\n}];"
+      },
+      "id": "check-payments",
+      "name": "Check Payments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.payments_missing }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "has-missing",
+      "name": "Missing Payments?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Telegram alert for missing payments\nconst data = $input.first().json;\n\nlet message = `🏠 *Mieteingangs-Prüfung*\\n\\n`;\nmessage += `📅 Stand: ${new Date().toLocaleDateString('de-DE')}\\n`;\nmessage += `━━━━━━━━━━━━━━━━━━\\n\\n`;\n\nif (data.payments_missing > 0) {\n  message += `⚠️ *${data.payments_missing} fehlende Zahlungen:*\\n\\n`;\n  \n  for (const missing of data.missing_details) {\n    message += `• *${missing.tenant_name}*\\n`;\n    message += `  Erwartet: €${missing.expected.toLocaleString('de-DE')}\\n`;\n    if (missing.phone) message += `  Tel: ${missing.phone}\\n`;\n    message += `\\n`;\n  }\n}\n\nmessage += `━━━━━━━━━━━━━━━━━━\\n`;\nmessage += `✅ Erhalten: ${data.payments_received}/${data.total_tenants}\\n`;\nmessage += `💰 €${data.total_received.toLocaleString('de-DE')} von €${data.total_expected.toLocaleString('de-DE')}`;\n\nreturn [{\n  json: {\n    message: message,\n    parse_mode: 'Markdown',\n    ...data\n  }\n}];"
+      },
+      "id": "prepare-alert",
+      "name": "Prepare Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1780,
+        200
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-creds",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "rent_check_logs",
+        "columns": "check_date, total_tenants, payments_received, payments_missing, total_expected, total_received, details",
+        "options": {}
+      },
+      "id": "log-check",
+      "name": "Log Check Result",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        400
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "lNiMUxJD75fdbZEl",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "5th of Month 09:00": {
+      "main": [
+        [
+          {
+            "node": "Get Active Tenants",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Tenants": {
+      "main": [
+        [
+          {
+            "node": "Prepare Date Range",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Date Range": {
+      "main": [
+        [
+          {
+            "node": "Get This Month's Income",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get This Month's Income": {
+      "main": [
+        [
+          {
+            "node": "Check Payments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Payments": {
+      "main": [
+        [
+          {
+            "node": "Missing Payments?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Missing Payments?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Check Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Alert": {
+      "main": [
+        [
+          {
+            "node": "Log Check Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "wealth"
+    },
+    {
+      "name": "real-estate"
+    }
+  ],
+  "active": false
+}
