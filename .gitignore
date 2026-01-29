@@ -34,6 +34,7 @@ volumes/
 backups/
 *.sql
 *.dump
+!supabase/migrations/*.sql
 
 # Temporary files
 tmp/
