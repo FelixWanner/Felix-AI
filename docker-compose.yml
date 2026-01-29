@@ -130,21 +130,6 @@ services:
       - caddy
 
   # ═══════════════════════════════════════════════════════════════
-  # PORTAINER - Docker Management UI
-  # ═══════════════════════════════════════════════════════════════
-  portainer:
-    image: portainer/portainer-ce:2.27.3
-    container_name: lifeos-portainer
-    restart: unless-stopped
-    command: --admin-password='$$2y$$05$$h8fk4oYsHWzT0NgUetnf1OKWpS4IhCgLSTFoLf9BWoJWnLSZnRWFG'
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - portainer_data:/data
-    networks:
-      - lifeos-net
-      - caddy
-
-  # ═══════════════════════════════════════════════════════════════
   # SUPABASE - Database & Backend
   # ═══════════════════════════════════════════════════════════════
 
@@ -424,7 +409,6 @@ services:
 # ═══════════════════════════════════════════════════════════════
 volumes:
   n8n_data:
-  portainer_data:
   lifeos_db_data:
   lifeos_storage_data:
 
