@@ -68,8 +68,16 @@ Caddy (80/443) → Routes to services:
 **Key Frontend Patterns**:
 - Custom hooks in `src/hooks/` (useAuth, useWealth, useDashboard, useProperties)
 - Zustand stores in `src/stores/`
-- React Query for data fetching
-- Supabase client in `src/lib/`
+- React Query for data fetching with realtime subscriptions
+- Supabase client in `src/lib/supabase.ts`
+- TypeScript strict mode enabled
+- Path alias: `@/` maps to `src/` (configured in vite.config.ts and tsconfig.json)
+
+**Frontend Component Structure**:
+- `src/components/` - Feature-based organization (dashboard, wealth, productivity, health, fitness, goals, journal, training)
+- `src/pages/` - Route-level components (Dashboard, Wealth, Productivity, Health, Goals, Journal, Fitness, Training, WeeklyUpdate)
+- `src/contexts/` - React contexts (ThemeContext, AuthContext)
+- `src/types/` - TypeScript definitions including generated Supabase types
 
 ## Database
 
@@ -77,7 +85,7 @@ PostgreSQL with 28 migrations in `supabase/migrations/`. Key schemas:
 - **Wealth**: accounts, transactions, properties, tenants, loans, ETFs, snapshots
 - **Health**: daily logs, supplements, vitals, Garmin sync
 - **Productivity**: tasks, calendar events, Microsoft Todo sync
-- **Fitness**: workouts, habits, streaks, points
+- **Fitness**: workouts, habits, streaks, gamification points system
 - **AI**: conversations, insights, vector embeddings (pgvector)
 
 Apply new migrations:
@@ -121,3 +129,5 @@ Edit workflows in n8n UI, export as JSON, replace files in `n8n/workflows/`.
 - N8N credentials must be configured in UI after workflow import
 - All services require Caddy for external access (HTTPS termination)
 - Frontend runs on Nginx with SPA routing configured in nginx.conf
+- Database uses RLS (Row-Level Security) - new tables need RLS policies for user data isolation
+- Service role credentials bypass RLS - use only in backend/n8n workflows
