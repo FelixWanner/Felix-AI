@@ -176,9 +176,9 @@ export function useTenantChanges(propertyId: string | undefined) {
 
       const { data, error } = await supabase
         .from('tenant_changes')
-        .select('*')
-        .eq('property_id', propertyId)
-        .order('change_date', { ascending: false })
+        .select('*, units!inner(property_id)')
+        .eq('units.property_id', propertyId)
+        .order('effective_date', { ascending: false })
 
       if (error) throw error
       return data as TenantChange[]
@@ -189,17 +189,16 @@ export function useTenantChanges(propertyId: string | undefined) {
 
 export function useAddTenantChange() {
   const queryClient = useQueryClient()
-  const { user } = useAuth()
 
   return useMutation({
     mutationFn: async (data: TenantChangeInsert) => {
       const { error } = await supabase
         .from('tenant_changes')
-        .insert({ ...data, user_id: user?.id })
+        .insert(data)
       if (error) throw error
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['tenant-changes', variables.property_id] })
+      queryClient.invalidateQueries({ queryKey: ['tenant-changes', variables.unit_id] })
     },
   })
 }
@@ -317,8 +316,8 @@ export function usePropertyKPIs(propertyId?: string) {
       // Fetch tenant changes
       const { data: tenantChanges, error: changeError } = await supabase
         .from('tenant_changes')
-        .select('*')
-        .order('change_date', { ascending: false })
+        .select('*, units!inner(property_id)')
+        .order('effective_date', { ascending: false })
 
       if (changeError) throw changeError
 
@@ -328,7 +327,7 @@ export function usePropertyKPIs(propertyId?: string) {
         const propertyLoans = (loans as Loan[]).filter(l => l.property_id === property.id)
         const opData = (operatingData as PropertyOperatingData[]).find(o => o.property_id === property.id)
         const techStatus = (technicalStatus as PropertyTechnicalStatus[]).find(t => t.property_id === property.id)
-        const lastChange = (tenantChanges as TenantChange[]).find(c => c.property_id === property.id)
+        const lastChange = (tenantChanges as (TenantChange & { units: { property_id: string } })[]).find(c => c.units?.property_id === property.id)
 
         // Unit calculations
         const unitCount = propertyUnits.length || property.unit_count || 1
@@ -437,7 +436,7 @@ export function usePropertyKPIs(propertyId?: string) {
           unitCount,
           occupiedUnits,
           vacantUnits,
-          lastTenantChange: lastChange?.change_date || null,
+          lastTenantChange: lastChange?.effective_date || null,
           heatingStatus,
           roofStatus,
           moistureStatus,

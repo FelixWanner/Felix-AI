@@ -81,7 +81,7 @@ Caddy (80/443) → Routes to services:
 
 ## Database
 
-PostgreSQL with 28 migrations in `supabase/migrations/`. Key schemas:
+PostgreSQL with 30 migrations in `supabase/migrations/`. Key schemas:
 - **Wealth**: accounts, transactions, properties, tenants, loans, ETFs, snapshots
 - **Health**: daily logs, supplements, vitals, Garmin sync
 - **Productivity**: tasks, calendar events, Microsoft Todo sync
@@ -123,11 +123,39 @@ Edit workflows in n8n UI, export as JSON, replace files in `n8n/workflows/`.
 - OpenAI API - AI features
 - Telegram Bot - Notifications
 
+## Testing
+
+No test framework is configured. Code quality is enforced via:
+- TypeScript strict mode (no `any` types, strict null checks)
+- ESLint for linting
+- Type checking via `npm run type-check`
+
+## Troubleshooting
+
+```bash
+# Check n8n workflow import
+docker logs lifeos-n8n-init
+
+# Check n8n health
+curl http://localhost:5678/healthz
+
+# Check service health
+docker compose ps
+
+# Restart a specific service
+docker compose restart [service-name]
+
+# Check database connectivity
+docker exec -it lifeos-db psql -U postgres -c "SELECT 1"
+```
+
 ## Important Notes
 
 - JWT_SECRET must never change after initial setup (invalidates all sessions)
-- N8N credentials must be configured in UI after workflow import
+- N8N credentials must be configured in UI after workflow import (see `n8n/README.md` for credential setup details)
 - All services require Caddy for external access (HTTPS termination)
 - Frontend runs on Nginx with SPA routing configured in nginx.conf
 - Database uses RLS (Row-Level Security) - new tables need RLS policies for user data isolation
 - Service role credentials bypass RLS - use only in backend/n8n workflows
+- Migrations are incremental - create new files, never edit existing ones
+- n8n documentation (`n8n/README.md`) is in German
